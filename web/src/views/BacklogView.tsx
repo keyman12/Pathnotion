@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
+import { Dropdown } from '../components/Dropdown';
 import type { BacklogItem, FounderKey, Stage } from '../lib/types';
 import { useBacklog, useCreateBacklog, useCreateSubfolder, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
 import { PRODUCT_DOCS } from '../lib/seed';
@@ -470,15 +471,16 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
         {/* Priority / Due / Progress / Effort — 4-column row, collapses gracefully on narrow containers */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
           <FieldLabel label="Priority">
-            <select
+            <Dropdown<Stage>
               value={item.stage}
-              onChange={(e) => onPatch({ stage: e.target.value as Stage })}
-              className="input"
-            >
-              <option value="now">Now</option>
-              <option value="next">Next</option>
-              <option value="later">Later</option>
-            </select>
+              onChange={(v) => onPatch({ stage: v })}
+              options={[
+                { value: 'now', label: 'Now' },
+                { value: 'next', label: 'Next' },
+                { value: 'later', label: 'Later' },
+              ]}
+              ariaLabel="Priority"
+            />
           </FieldLabel>
 
           <FieldLabel label="Due date">
@@ -537,24 +539,24 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
         {/* Owner / Product — secondary row. Sub-folder appears below only when the product has any. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
           <FieldLabel label="Owner">
-            <select
+            <Dropdown<BacklogItem['owner']>
               value={item.owner}
-              onChange={(e) => onPatch({ owner: e.target.value as BacklogItem['owner'] })}
-              className="input"
-            >
-              <option value="D">Dave</option>
-              <option value="R">Raj</option>
-            </select>
+              onChange={(v) => onPatch({ owner: v })}
+              options={[
+                { value: 'D', label: 'Dave' },
+                { value: 'R', label: 'Raj' },
+              ]}
+              ariaLabel="Owner"
+            />
           </FieldLabel>
 
           <FieldLabel label="Product">
-            <select
+            <Dropdown<string>
               value={item.product}
-              onChange={(e) => onPatch({ product: e.target.value, subfolderId: null })}
-              className="input"
-            >
-              {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
-            </select>
+              onChange={(v) => onPatch({ product: v, subfolderId: null })}
+              options={products.map((pp) => ({ value: pp.id, label: pp.label }))}
+              ariaLabel="Product"
+            />
           </FieldLabel>
         </div>
 
@@ -565,16 +567,18 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
 
         <FieldLabel label="Sub-folder">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <select
-              value={item.subfolderId ?? ''}
-              onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
-              className="input"
-              style={{ flex: '1 1 200px', minWidth: 180, maxWidth: 360 }}
-              disabled={productSubfolders.length === 0}
-            >
-              <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders yet'}</option>
-              {productSubfolders.map((sf) => <option key={sf.id} value={sf.id}>{sf.name}</option>)}
-            </select>
+            <div style={{ flex: '1 1 200px', minWidth: 180, maxWidth: 360 }}>
+              <Dropdown<string | number>
+                value={item.subfolderId ?? ''}
+                onChange={(v) => onPatch({ subfolderId: v === '' ? null : Number(v) })}
+                options={[
+                  { value: '', label: productSubfolders.length ? '— none —' : 'No sub-folders yet' },
+                  ...productSubfolders.map((sf) => ({ value: sf.id, label: sf.name })),
+                ]}
+                disabled={productSubfolders.length === 0}
+                ariaLabel="Sub-folder"
+              />
+            </div>
             <button
               type="button"
               className="btn btn-ghost"
@@ -657,30 +661,33 @@ function AttachPicker({ value, onChange }: {
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <select
-        value={type}
-        onChange={(e) => {
-          const t = e.target.value as '' | 'doc' | 'backlog' | 'url';
-          setType(t);
-          if (!t) { setRef(''); onChange(null); }
-        }}
-        className="input"
-        style={{ flex: '0 0 140px' }}
-      >
-        <option value="">— none —</option>
-        <option value="doc">Document</option>
-        <option value="url">Link / URL</option>
-      </select>
+      <div style={{ flex: '0 0 160px' }}>
+        <Dropdown<'' | 'doc' | 'url'>
+          value={type === 'backlog' ? '' : type}
+          onChange={(t) => {
+            setType(t);
+            if (!t) { setRef(''); onChange(null); }
+          }}
+          options={[
+            { value: '', label: '— none —' },
+            { value: 'doc', label: 'Document' },
+            { value: 'url', label: 'Link / URL' },
+          ]}
+          ariaLabel="Attach type"
+        />
+      </div>
       {type === 'doc' && (
-        <select
-          value={ref}
-          onChange={(e) => { setRef(e.target.value); commit('doc', e.target.value); }}
-          className="input"
-          style={{ flex: '1 1 200px', minWidth: 180 }}
-        >
-          <option value="">— pick one —</option>
-          {PRODUCT_DOCS.map((d) => <option key={d.id} value={d.title}>{d.title}</option>)}
-        </select>
+        <div style={{ flex: '1 1 200px', minWidth: 180 }}>
+          <Dropdown<string>
+            value={ref}
+            onChange={(v) => { setRef(v); commit('doc', v); }}
+            options={[
+              { value: '', label: '— pick one —' },
+              ...PRODUCT_DOCS.map((d) => ({ value: d.title, label: d.title })),
+            ]}
+            ariaLabel="Document"
+          />
+        </div>
       )}
       {type === 'url' && (
         <input
