@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client.js';
-import { requireAdmin } from '../middleware/auth.js';
 
 export const subfoldersRouter = Router();
 
@@ -25,7 +24,7 @@ const createSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
-subfoldersRouter.post('/', requireAdmin, (req, res) => {
+subfoldersRouter.post('/', (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS n FROM subfolders WHERE product_id = ?').get(parsed.data.productId) as { n: number }).n;
@@ -46,7 +45,7 @@ const patchSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
-subfoldersRouter.patch('/:id', requireAdmin, (req, res) => {
+subfoldersRouter.patch('/:id', (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   const sets: string[] = [];
@@ -60,7 +59,7 @@ subfoldersRouter.patch('/:id', requireAdmin, (req, res) => {
   res.json(row);
 });
 
-subfoldersRouter.delete('/:id', requireAdmin, (req, res) => {
+subfoldersRouter.delete('/:id', (req, res) => {
   const result = db.prepare('DELETE FROM subfolders WHERE id = ?').run(req.params.id);
   if (!result.changes) return res.status(404).json({ error: 'Not found' });
   res.status(204).send();

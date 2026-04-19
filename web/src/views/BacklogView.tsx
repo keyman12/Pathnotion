@@ -3,7 +3,7 @@ import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
 import type { BacklogItem, FounderKey, Stage } from '../lib/types';
-import { useBacklog, useCreateBacklog, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
+import { useBacklog, useCreateBacklog, useCreateSubfolder, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
 import { useSession } from '../lib/useSession';
 import type { Subfolder } from '../lib/api';
 
@@ -32,6 +32,7 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   const createBacklog = useCreateBacklog();
   const patchBacklog = usePatchBacklog();
   const deleteBacklog = useDeleteBacklog();
+  const createSubfolder = useCreateSubfolder();
 
   const items = backlogQ.data ?? [];
   const products = productsQ.data ?? [];
@@ -116,9 +117,9 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
         tabs={tabs ? <BacklogTabs value={tab} onChange={setTab} tabs={tabs} /> : undefined}
       />
 
-      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} subfolders={subfolders} productFilter={productFilter ?? null} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
-      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
-      {layout === 'list' && <BacklogList items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
+      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} subfolders={subfolders} productFilter={productFilter ?? null} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
+      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
+      {layout === 'list' && <BacklogList items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
 
       {showNew && (
         <NewItemDialog
@@ -171,9 +172,10 @@ interface LayoutProps {
   onToggle: (id: string) => void;
   onPatch: (id: string, patch: Partial<BacklogItem>) => void;
   onDelete: (id: string) => void;
+  onCreateSubfolder: (productId: string, name: string) => Promise<{ id: number }>;
 }
 
-function BacklogKanban({ items, products, subfolders, productFilter, expandedId, onToggle, onPatch, onDelete }: LayoutProps & { productFilter: string | null }) {
+function BacklogKanban({ items, products, subfolders, productFilter, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps & { productFilter: string | null }) {
   const prods = productFilter ? products.filter((p) => p.id === productFilter) : products;
   return (
     <div style={{
@@ -195,13 +197,13 @@ function BacklogKanban({ items, products, subfolders, productFilter, expandedId,
         </div>
       ))}
       {prods.map((p) => (
-        <ProductRow key={p.id} product={p} items={items} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={onToggle} onPatch={onPatch} onDelete={onDelete} />
+        <ProductRow key={p.id} product={p} items={items} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={onToggle} onPatch={onPatch} onDelete={onDelete} onCreateSubfolder={onCreateSubfolder} />
       ))}
     </div>
   );
 }
 
-function ProductRow({ product, items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: { product: Product } & LayoutProps) {
+function ProductRow({ product, items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: { product: Product } & LayoutProps) {
   const rowItems = items.filter((i) => i.product === product.id);
   return (
     <>
@@ -228,7 +230,7 @@ function ProductRow({ product, items, products, subfolders, expandedId, onToggle
               ? <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', padding: '8px 4px' }}>—</div>
               : cell.map((i) => (
                   expandedId === i.id
-                    ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                    ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="compact" />
                     : <KanbanCell key={i.id} item={i} product={product} subfolders={subfolders} onClick={() => onToggle(i.id)} />
                 ))}
           </div>
@@ -285,7 +287,7 @@ function formatDue(s: string | null | undefined): string {
   return s;
 }
 
-function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
+function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
       {STAGES.map((s) => {
@@ -301,7 +303,7 @@ function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPat
             </div>
             {col.map((i) => (
               expandedId === i.id
-                ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="compact" />
                 : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} compact />
             ))}
           </div>
@@ -311,12 +313,12 @@ function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPat
   );
 }
 
-function BacklogList({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
+function BacklogList({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {items.map((i) => (
         expandedId === i.id
-          ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="roomy" />
+          ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="roomy" />
           : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} />
       ))}
     </div>
@@ -381,13 +383,14 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
 }
 
 // Inline editor — replaces the card when expanded. Auto-saves on change.
-function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete }: {
+function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete, onCreateSubfolder }: {
   item: BacklogItem;
   products: Product[];
   subfolders: Subfolder[];
   onCollapse: () => void;
   onPatch: (patch: Partial<BacklogItem>) => void;
   onDelete: () => void;
+  onCreateSubfolder: (productId: string, name: string) => Promise<{ id: number }>;
   density?: 'compact' | 'roomy'; // kept for call-site compatibility; layout is now always the same
 }) {
   const p = products.find((x) => x.id === item.product);
@@ -554,19 +557,37 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           </FieldLabel>
         </div>
 
-        {productSubfolders.length > 0 && (
-          <FieldLabel label="Sub-folder">
+        <FieldLabel label="Sub-folder">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select
               value={item.subfolderId ?? ''}
               onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
               className="input"
-              style={{ maxWidth: 280 }}
+              style={{ maxWidth: 280, flex: '0 0 280px' }}
+              disabled={productSubfolders.length === 0}
             >
-              <option value="">— none —</option>
+              <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders yet'}</option>
               {productSubfolders.map((sf) => <option key={sf.id} value={sf.id}>{sf.name}</option>)}
             </select>
-          </FieldLabel>
-        )}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '6px 10px', fontSize: 12 }}
+              onClick={async () => {
+                const name = prompt(`New sub-folder under "${p?.label ?? item.product}":`)?.trim();
+                if (!name) return;
+                try {
+                  const created = await onCreateSubfolder(item.product, name);
+                  onPatch({ subfolderId: created.id });
+                } catch (err) {
+                  alert(`Could not create sub-folder: ${(err as Error).message}`);
+                }
+              }}
+            >
+              <Icon name="plus" size={12} /> New
+            </button>
+          </div>
+        </FieldLabel>
 
         <div className="inline-editor-footer" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--border-subtle)', paddingTop: 14, marginTop: 4 }}>
           <button

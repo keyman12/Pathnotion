@@ -117,10 +117,18 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .chip-next    { background: #FFF6E6; color: #B54708; }
 .chip-later   { background: #ECFDF3; color: #037847; }
 .chip-overdue { background: #FEE4E2; color: #912018; }
-.chip-due     { background: #1E1E1E; color: #fff; }
+.chip-due     { background: #FFF0D6; color: #92400E; }
 .chip-new     { background: #FF5252; color: #fff; }
 .chip-done    { background: #F3F3F3; color: #747973; text-decoration: line-through; }
 .chip-neutral { background: #F3F3F3; color: #565955; }
+/* Dark-mode chip overrides — hand-tuned so each stands out on a dark canvas */
+[data-theme="dark"] .chip-now     { background: #3A1520; color: #FF90B8; }
+[data-theme="dark"] .chip-next    { background: #2B2211; color: #F2C14E; }
+[data-theme="dark"] .chip-later   { background: #0D2A1A; color: #6EF0A8; }
+[data-theme="dark"] .chip-overdue { background: #3A1520; color: #FFB0C4; }
+[data-theme="dark"] .chip-due     { background: #3A2411; color: #FFC774; }
+[data-theme="dark"] .chip-neutral { background: #2A2A2A; color: #9A9A9A; }
+[data-theme="dark"] .chip-done    { background: #2A2A2A; color: #9A9A9A; }
 
 .tag {
   display: inline-flex;
