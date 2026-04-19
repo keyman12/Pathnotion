@@ -1,0 +1,200 @@
+:root {
+  /* Brand palette */
+  --path-primary: #297D2D;
+  --path-primary-light-1: #3B9F40;
+  --path-primary-light-2: #49BC4E;
+  --path-primary-50: #74D479;
+  --path-primary-25: #97DF9A;
+  --path-primary-tint: #ECFDF3;
+  --path-primary-ink: #037847;
+
+  --path-secondary: #FF5252;
+  --path-secondary-light-1: #FF8A80;
+  --path-secondary-light-2: #FFA49C;
+
+  --path-accent-blue: #0068A3;
+  --path-accent-navy: #10298E;
+  --path-accent-deep: #002855;
+  --path-accent-violet: #2D2341;
+
+  /* Greyscale */
+  --grey-0: #FFFFFF;
+  --grey-25: #F8F8F8;
+  --grey-50: #F5F5F5;
+  --grey-75: #F3F3F3;
+  --grey-100: #EAECF0;
+  --grey-150: #DADADA;
+  --grey-200: #D8DBD8;
+  --grey-300: #AFB3AF;
+  --grey-400: #919593;
+  --grey-500: #747973;
+  --grey-600: #565955;
+  --grey-700: #454745;
+  --grey-800: #222222;
+  --grey-900: #1E1E1E;
+  --grey-1000: #1A1919;
+  --ink: #000000;
+
+  /* Semantic (light mode defaults) */
+  --fg-1: var(--grey-900);
+  --fg-2: var(--grey-700);
+  --fg-3: var(--grey-500);
+  --fg-4: var(--grey-400);
+  --fg-on-primary: var(--grey-0);
+  --fg-link: var(--path-accent-blue);
+
+  --bg-canvas: var(--grey-25);
+  --bg-surface: var(--grey-0);
+  --bg-raised: var(--grey-0);
+  --bg-sunken: var(--grey-50);
+  --bg-hover: var(--grey-75);
+  --bg-active: var(--grey-100);
+
+  --border-subtle: var(--grey-100);
+  --border-default: var(--grey-200);
+  --border-strong: var(--grey-300);
+
+  --success-bg: var(--path-primary-tint);
+  --success-fg: var(--path-primary-ink);
+  --success-dot: var(--path-primary-light-1);
+  --danger-bg: #FEF3F2;
+  --danger-fg: #B42318;
+  --danger-dot: var(--path-secondary);
+  --warning-bg: #FFFAEB;
+  --warning-fg: #B54708;
+  --info-bg: #EFF8FF;
+  --info-fg: var(--path-accent-blue);
+
+  --accent-bar: var(--path-primary-light-2);
+
+  /* Type families */
+  --font-primary: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-secondary: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-numeric: 'Inter', 'Poppins', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Liberation Mono', monospace;
+
+  /* Type scale */
+  --fs-h0: 72px;
+  --fs-h1: 48px;
+  --fs-h2: 32px;
+  --fs-h3: 24px;
+  --fs-h4: 18px;
+  --fs-p1: 16px;
+  --fs-p2: 14px;
+  --fs-p3: 12px;
+  --fs-p4: 10px;
+
+  --lh-tight: 1.0;
+  --lh-snug: 1.2;
+  --lh-body: 1.5;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extra: 800;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow-2: 0 2px 6px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-3: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(73, 188, 78, 0.20);
+
+  /* Spacing (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
+  --sp-10: 64px;
+
+  /* Layout */
+  --layout-sidebar-w: 228px;
+  --layout-topbar-h: 56px;
+  --layout-content-max: 1250px;
+
+  /* Density knobs */
+  --dens-row-y: 14px;
+  --dens-row-x: 20px;
+  --dens-card-pad: 20px;
+  --dens-section-gap: 28px;
+  --dens-read-col: 720px;
+  --dens-line: 1.6;
+}
+
+/* Dark theme — values lifted from the prototype at runtime */
+[data-theme="dark"] {
+  --bg-canvas: #121212;
+  --bg-surface: #1E1E1E;
+  --bg-raised: #242424;
+  --bg-sunken: #181818;
+  --bg-hover: #262626;
+  --bg-active: #2E2E2E;
+
+  --border-subtle: #2A2A2A;
+  --border-default: #3A3A3A;
+  --border-strong: #4A4A4A;
+
+  --fg-1: #F3F3F3;
+  --fg-2: #D4D4D4;
+  --fg-3: #9A9A9A;
+  --fg-4: #6B6B6B;
+  --fg-on-primary: #0D1F14;
+
+  --path-primary: #00E676;
+  --path-primary-light-1: #2EEA8A;
+  --path-primary-light-2: #6EF0A8;
+  --path-primary-tint: #0D2A1A;
+  --path-primary-hover: #1AF088;
+  --path-primary-ink: #6EF0A8;
+
+  --path-secondary: #FF3B7F;
+  --path-accent-blue: #4FA3FF;
+
+  --success-bg: #0D2A1A;
+  --success-fg: #6EF0A8;
+  --success-dot: #00E676;
+  --danger-bg: #3A1520;
+  --danger-fg: #FF90B8;
+  --danger-dot: #FF3B7F;
+  --warning-bg: #2E2315;
+  --warning-fg: #F2C14E;
+  --warn-dot: #F2C14E;
+  --info-bg: #12253A;
+  --info-fg: #4FA3FF;
+
+  --accent-bar: #00E676;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 10px 32px rgba(0, 0, 0, 0.35);
+  --shadow-focus: 0 0 0 3px rgba(0, 230, 118, 0.28);
+}
+
+[data-density="airy"] {
+  --dens-row-y: 20px;
+  --dens-card-pad: 32px;
+  --dens-section-gap: 40px;
+  --dens-line: 1.7;
+}
+
+[data-density="dense"] {
+  --dens-row-y: 8px;
+  --dens-row-x: 14px;
+  --dens-card-pad: 14px;
+  --dens-section-gap: 18px;
+  --dens-line: 1.5;
+}
