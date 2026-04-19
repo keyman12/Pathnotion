@@ -7,6 +7,7 @@ export type Route =
   | 'tasks'
   | 'calendar'
   | 'jeff'
+  | 'settings'
   | 'finance-docs'
   | 'sales-docs'
   | 'legal-docs'
@@ -33,10 +34,14 @@ export interface BacklogItem {
   product: string;
   stage: Stage;
   owner: FounderKey;
-  note?: string;
+  note?: string | null;
   due?: string | null;
-  age?: string;
-  flag?: 'due-soon' | 'overdue';
+  age?: string | null;
+  flag?: 'due-soon' | 'overdue' | null;
+  progress?: number;
+  sortOrder?: number;
+  completedAt?: string | null;
+  subfolderId?: number | null;
 }
 
 export interface Task {

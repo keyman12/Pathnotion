@@ -1,16 +1,29 @@
 import { Avatar, BacklogRow, HeadlineCard } from '../components/primitives';
 import { Icon } from '../components/Icon';
-import { BACKLOG, EVENTS, PRODUCTS, PRODUCT_DOCS, TASKS } from '../lib/seed';
+import { PRODUCT_DOCS } from '../lib/seed';
 import { useUI } from '../lib/store';
-import type { CalendarEvent, Doc } from '../lib/types';
+import { useSession } from '../lib/useSession';
+import { useBacklog, useCalendar, useProducts, useTasks } from '../lib/queries';
+import type { CalendarEvent, Doc, FounderKey } from '../lib/types';
 
 export function WeekView({ now }: { now: Date }) {
   const navigate = useUI((s) => s.navigate);
+  const session = useSession();
+  const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
 
-  const nowItems = BACKLOG.filter((b) => b.stage === 'now');
-  const dueThisWeek = BACKLOG.filter((b) => b.flag === 'due-soon' || b.flag === 'overdue');
-  const tasksToday = TASKS.filter((t) => !t.done && (t.due === 'today' || t.due === 'tomorrow'));
-  const todayEvents = EVENTS.filter((e) => e.day === 0).sort((a, b) => a.start - b.start);
+  const backlogQ = useBacklog();
+  const tasksQ = useTasks();
+  const calQ = useCalendar();
+  const productsQ = useProducts();
+
+  const items = backlogQ.data ?? [];
+  const tasks = tasksQ.data ?? [];
+  const events = calQ.data ?? [];
+
+  const nowItems = items.filter((b) => b.stage === 'now');
+  const dueThisWeek = items.filter((b) => b.flag === 'due-soon' || b.flag === 'overdue');
+  const tasksToday = tasks.filter((t) => !t.done && (t.due === 'today' || t.due === 'tomorrow'));
+  const todayEvents = events.filter((e) => e.day === 0).sort((a, b) => a.start - b.start);
   const recentDocs = PRODUCT_DOCS.filter((d) => d.updated.includes('today') || d.updated.includes('yesterday')).slice(0, 3);
 
   const meta = now
@@ -19,10 +32,11 @@ export function WeekView({ now }: { now: Date }) {
     .toUpperCase();
   const weekNo = getWeekNumber(now);
 
-  const overdueCount = BACKLOG.filter((b) => b.flag === 'overdue').length;
-  const dueCount = BACKLOG.filter((b) => b.flag === 'due-soon').length;
+  const overdueCount = items.filter((b) => b.flag === 'overdue').length;
+  const dueCount = items.filter((b) => b.flag === 'due-soon').length;
   const dDave = nowItems.filter((i) => i.owner === 'D').length;
   const dRaj = nowItems.filter((i) => i.owner === 'R').length;
+  const greetingName = session.data?.displayName ?? 'Dave';
 
   return (
     <div className="screen-enter">
@@ -36,9 +50,9 @@ export function WeekView({ now }: { now: Date }) {
           margin: 0, letterSpacing: '-0.015em', lineHeight: 1.15,
           maxWidth: 780,
         }}>
-          Good morning, Dave.{' '}
+          Good morning, {greetingName}.{' '}
           <span style={{ color: 'var(--fg-3)' }}>
-            Three things in flight, one clash on Wednesday, and Raj is working on the Lloyds MoU.
+            {nowItems.length} in flight, {dueThisWeek.length} needing attention, {todayEvents.length} meetings today.
           </span>
         </h1>
       </div>
@@ -107,7 +121,7 @@ export function WeekView({ now }: { now: Date }) {
 
           <Section title="Recently edited" actionLabel="All →" onAction={() => navigate('docs')}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recentDocs.map((d) => <DocRow key={d.id} doc={d} />)}
+              {recentDocs.map((d) => <DocRow key={d.id} doc={d} products={productsQ.data ?? []} />)}
             </div>
           </Section>
         </div>
@@ -159,8 +173,8 @@ function TodayRow({ event, last }: { event: CalendarEvent; last: boolean }) {
   );
 }
 
-function DocRow({ doc }: { doc: Doc }) {
-  const p = doc.product ? PRODUCTS.find((x) => x.id === doc.product) : null;
+function DocRow({ doc, products }: { doc: Doc; products: Array<{ id: string; label: string; color: string }> }) {
+  const p = doc.product ? products.find((x) => x.id === doc.product) : null;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12,

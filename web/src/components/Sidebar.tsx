@@ -4,6 +4,7 @@ import type { IconName } from './Icon';
 import { Icon } from './Icon';
 import { Avatar } from './primitives';
 import type { Route } from '../lib/types';
+import { useSession } from '../lib/useSession';
 
 interface NavLink { route: Route; label: string; icon: IconName; badge?: string; }
 
@@ -27,6 +28,8 @@ export function Sidebar() {
   const navigate = useUI((s) => s.navigate);
   const openSearch = useUI((s) => s.openSearch);
   const theme = useUI((s) => s.theme);
+  const session = useSession();
+  const isAdmin = session.data?.role === 'admin';
 
   return (
     <aside className="sidebar">
@@ -109,6 +112,18 @@ export function Sidebar() {
             );
           })}
         </div>
+
+        {isAdmin && (
+          <div className="sidebar-section" style={{ marginTop: 'auto' }}>
+            <div
+              className={`nav-row ${route === 'settings' ? 'is-active' : ''}`}
+              onClick={() => navigate('settings')}
+            >
+              <Icon name="settings" size={16} color={route === 'settings' ? 'var(--path-primary)' : 'var(--grey-500)'} />
+              <span className="nav-row__label">Settings</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="sidebar-foot">

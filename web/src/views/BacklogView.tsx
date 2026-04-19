@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
-import { BACKLOG, PRODUCTS, FOUNDERS, PRODUCT_DOCS } from '../lib/seed';
-import type { BacklogItem, Stage } from '../lib/types';
+import { FOUNDERS, PRODUCT_DOCS } from '../lib/seed';
+import type { BacklogItem, FounderKey, Stage } from '../lib/types';
 import { useUI } from '../lib/store';
+import { useBacklog, useCreateBacklog, useDeleteBacklog, usePatchBacklog, useProducts } from '../lib/queries';
+import { useSession } from '../lib/useSession';
 
 type Layout = 'kanban' | 'lanes' | 'list';
 type OwnerFilter = 'global' | 'mine' | 'raj' | 'flagged';
@@ -20,20 +22,31 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   const [tab, setTab] = useState<OwnerFilter>('global');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<BacklogItem | null>(null);
-  const [items, setItems] = useState<BacklogItem[]>(BACKLOG);
+  const [showNew, setShowNew] = useState(false);
   const navigate = useUI((s) => s.navigate);
+  const session = useSession();
+  const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
+
+  const backlogQ = useBacklog();
+  const productsQ = useProducts();
+  const createBacklog = useCreateBacklog();
+  const patchBacklog = usePatchBacklog();
+  const deleteBacklog = useDeleteBacklog();
+
+  const items = backlogQ.data ?? [];
+  const products = productsQ.data ?? [];
 
   const filtered = useMemo(() => items.filter((b) => {
     if (productFilter && b.product !== productFilter) return false;
-    if (tab === 'mine' && b.owner !== 'D') return false;
-    if (tab === 'raj' && b.owner !== 'R') return false;
+    if (tab === 'mine' && b.owner !== me) return false;
+    if (tab === 'raj' && b.owner === me) return false;
     if (tab === 'flagged' && !b.flag) return false;
     if (query) {
       const hay = `${b.title}${b.id}${b.note ?? ''}`.toLowerCase();
       if (!hay.includes(query.toLowerCase())) return false;
     }
     return true;
-  }), [items, productFilter, tab, query]);
+  }), [items, productFilter, tab, query, me]);
 
   const counts = {
     now: filtered.filter((i) => i.stage === 'now').length,
@@ -41,7 +54,7 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
     later: filtered.filter((i) => i.stage === 'later').length,
   };
 
-  const currentProduct = productFilter ? PRODUCTS.find((p) => p.id === productFilter) : null;
+  const currentProduct = productFilter ? products.find((p) => p.id === productFilter) : null;
 
   const sub = currentProduct
     ? <>One product. Now <b style={{ color: 'var(--fg-2)' }}>{counts.now}</b>, Next {counts.next}, Later {counts.later}. Drag to reorder.</>
@@ -49,8 +62,8 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
 
   const tabs = !productFilter ? [
     { id: 'global' as const, label: 'All products', count: items.length },
-    { id: 'mine' as const, label: 'Mine', count: items.filter((i) => i.owner === 'D').length },
-    { id: 'raj' as const, label: "Raj's", count: items.filter((i) => i.owner === 'R').length },
+    { id: 'mine' as const, label: 'Mine', count: items.filter((i) => i.owner === me).length },
+    { id: 'raj' as const, label: me === 'D' ? "Raj's" : "Dave's", count: items.filter((i) => i.owner !== me).length },
     { id: 'flagged' as const, label: 'Flagged', count: items.filter((i) => i.flag).length },
   ] : null;
 
@@ -76,17 +89,37 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
               <IconToggle on={layout === 'lanes'} onClick={() => setLayout('lanes')} label="Lanes" icon="table" />
               <IconToggle on={layout === 'list'} onClick={() => setLayout('list')} label="List" icon="list" />
             </div>
-            <button className="btn btn-primary"><Icon name="plus" size={14} /> Add item</button>
+            <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="plus" size={14} /> Add item</button>
           </>
         }
         tabs={tabs ? <BacklogTabs value={tab} onChange={setTab} tabs={tabs} /> : undefined}
       />
 
-      {layout === 'kanban' && <BacklogKanban items={filtered} onItemClick={setSelected} productFilter={productFilter ?? null} />}
-      {layout === 'lanes' && <BacklogLanes items={filtered} onItemClick={setSelected} />}
-      {layout === 'list' && <BacklogList items={filtered} onItemClick={setSelected} />}
+      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} onItemClick={setSelected} productFilter={productFilter ?? null} />}
+      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} onItemClick={setSelected} />}
+      {layout === 'list' && <BacklogList items={filtered} products={products} onItemClick={setSelected} />}
 
-      {selected && <ItemDrawer item={selected} onClose={() => setSelected(null)} onOpenProduct={() => { navigate(`product:${selected.product}`); setSelected(null); }} />}
+      {selected && (
+        <ItemDrawer
+          item={selected}
+          products={products}
+          onClose={() => setSelected(null)}
+          onOpenProduct={() => { navigate(`product:${selected.product}`); setSelected(null); }}
+          onPatch={(patch) => patchBacklog.mutate({ id: selected.id, patch }, { onSuccess: (row) => setSelected((curr) => curr && curr.id === selected.id ? row : curr) })}
+          onDelete={() => { deleteBacklog.mutate(selected.id); setSelected(null); }}
+        />
+      )}
+
+      {showNew && (
+        <NewItemDialog
+          defaultProduct={productFilter ?? (products[0]?.id ?? '')}
+          defaultOwner={me}
+          products={products}
+          existingIds={items.map((i) => i.id)}
+          onClose={() => setShowNew(false)}
+          onCreate={(body) => createBacklog.mutate(body, { onSuccess: () => setShowNew(false) })}
+        />
+      )}
     </div>
   );
 }
@@ -118,8 +151,10 @@ function BacklogTabs({ value, onChange, tabs }: { value: OwnerFilter; onChange: 
   );
 }
 
-function BacklogKanban({ items, onItemClick, productFilter }: { items: BacklogItem[]; onItemClick: (i: BacklogItem) => void; productFilter: string | null }) {
-  const prods = productFilter ? PRODUCTS.filter((p) => p.id === productFilter) : PRODUCTS;
+type Product = { id: string; label: string; color: string; accent?: string; count?: number };
+
+function BacklogKanban({ items, products, onItemClick, productFilter }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void; productFilter: string | null }) {
+  const prods = productFilter ? products.filter((p) => p.id === productFilter) : products;
   return (
     <div style={{
       display: 'grid',
@@ -146,7 +181,7 @@ function BacklogKanban({ items, onItemClick, productFilter }: { items: BacklogIt
   );
 }
 
-function Row({ product, items, onItemClick }: { product: typeof PRODUCTS[0]; items: BacklogItem[]; onItemClick: (i: BacklogItem) => void }) {
+function Row({ product, items, onItemClick }: { product: Product; items: BacklogItem[]; onItemClick: (i: BacklogItem) => void }) {
   const rowItems = items.filter((i) => i.product === product.id);
   return (
     <>
@@ -195,7 +230,7 @@ function Row({ product, items, onItemClick }: { product: typeof PRODUCTS[0]; ite
   );
 }
 
-function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: typeof PRODUCTS[0]; onClick: () => void }) {
+function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: Product; onClick: () => void }) {
   return (
     <div className="row-hover" onClick={onClick} style={{
       position: 'relative',
@@ -222,7 +257,7 @@ function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: ty
   );
 }
 
-function BacklogLanes({ items, onItemClick }: { items: BacklogItem[]; onItemClick: (i: BacklogItem) => void }) {
+function BacklogLanes({ items, products, onItemClick }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
       {STAGES.map((s) => {
@@ -236,7 +271,7 @@ function BacklogLanes({ items, onItemClick }: { items: BacklogItem[]; onItemClic
               <div style={{ flex: 1 }} />
               <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{s.note}</span>
             </div>
-            {col.map((i) => <BacklogRow key={i.id} item={i} onClick={() => onItemClick(i)} compact />)}
+            {col.map((i) => <BacklogRow key={i.id} item={i} products={products} onClick={() => onItemClick(i)} compact />)}
           </div>
         );
       })}
@@ -244,16 +279,17 @@ function BacklogLanes({ items, onItemClick }: { items: BacklogItem[]; onItemClic
   );
 }
 
-function BacklogList({ items, onItemClick }: { items: BacklogItem[]; onItemClick: (i: BacklogItem) => void }) {
+function BacklogList({ items, products, onItemClick }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.map((i) => <BacklogRow key={i.id} item={i} onClick={() => onItemClick(i)} />)}
+      {items.map((i) => <BacklogRow key={i.id} item={i} products={products} onClick={() => onItemClick(i)} />)}
     </div>
   );
 }
 
-function BacklogRow({ item, onClick, compact, showProduct = true }: { item: BacklogItem; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
-  const p = PRODUCTS.find((x) => x.id === item.product)!;
+function BacklogRow({ item, products, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
+  const p = products.find((x) => x.id === item.product);
+  if (!p) return null;
   return (
     <div onClick={onClick} className="row-hover" style={{
       position: 'relative',
@@ -296,7 +332,7 @@ function BacklogRow({ item, onClick, compact, showProduct = true }: { item: Back
   );
 }
 
-function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'due-soon' }) {
+function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'due-soon' | null }) {
   if (flag === 'overdue') return <span className="chip chip-overdue">Overdue</span>;
   if (flag === 'due-soon') return <span className="chip chip-due">Due soon</span>;
   const cls = stage === 'now' ? 'chip-now' : stage === 'next' ? 'chip-next' : 'chip-later';
@@ -304,9 +340,35 @@ function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'du
   return <span className={`chip ${cls}`}>{label}</span>;
 }
 
-function ItemDrawer({ item, onClose, onOpenProduct }: { item: BacklogItem; onClose: () => void; onOpenProduct: () => void }) {
-  const p = PRODUCTS.find((x) => x.id === item.product)!;
+function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete }: {
+  item: BacklogItem;
+  products: Product[];
+  onClose: () => void;
+  onOpenProduct: () => void;
+  onPatch: (patch: Partial<BacklogItem>) => void;
+  onDelete: () => void;
+}) {
+  const p = products.find((x) => x.id === item.product);
   const docs = PRODUCT_DOCS.filter((d) => d.product === item.product).slice(0, 2);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(item.title);
+  const [note, setNote] = useState(item.note ?? '');
+  const [due, setDue] = useState(item.due ?? '');
+  const [productId, setProductId] = useState(item.product);
+  const [stage, setStage] = useState<Stage>(item.stage);
+  const [owner, setOwner] = useState<BacklogItem['owner']>(item.owner);
+
+  const commit = () => {
+    const patch: Partial<BacklogItem> = {};
+    if (title.trim() && title !== item.title) patch.title = title.trim();
+    if ((note || null) !== (item.note || null)) patch.note = note || null;
+    if ((due || null) !== (item.due || null)) patch.due = due || null;
+    if (productId !== item.product) patch.product = productId;
+    if (stage !== item.stage) patch.stage = stage;
+    if (owner !== item.owner) patch.owner = owner;
+    if (Object.keys(patch).length) onPatch(patch);
+    setEditing(false);
+  };
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 30 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(30,30,30,0.35)' }} />
@@ -319,35 +381,87 @@ function ItemDrawer({ item, onClose, onOpenProduct }: { item: BacklogItem; onClo
       }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>{item.id}</span>
-          <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>
+          {p && <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>}
           <div style={{ flex: 1 }} />
           <StageChipInline stage={item.stage} flag={item.flag} />
           <button onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={14} /></button>
         </div>
         <div style={{ padding: '24px 28px', overflowY: 'auto', flex: 1 }}>
-          <h2 style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 12px', letterSpacing: '-0.005em' }}>{item.title}</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 10, columnGap: 16, fontSize: 13, marginTop: 16 }}>
+          {editing ? (
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+              className="input"
+              style={{ width: '100%', fontSize: 18, fontWeight: 600, height: 40 }}
+            />
+          ) : (
+            <h2 onDoubleClick={() => setEditing(true)} style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 12px', letterSpacing: '-0.005em' }}>{item.title}</h2>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 10, columnGap: 16, fontSize: 13, marginTop: 16, alignItems: 'center' }}>
             <div className="meta" style={{ fontSize: 10 }}>Stage</div>
-            <div><StageChipInline stage={item.stage} /></div>
-            <div className="meta" style={{ fontSize: 10 }}>Owner</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Avatar who={item.owner} size={22} />
-              <span>{FOUNDERS[item.owner].name}</span>
+            <div>
+              {editing ? (
+                <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className="input" style={{ height: 30, padding: '0 8px' }}>
+                  <option value="now">Now</option>
+                  <option value="next">Next</option>
+                  <option value="later">Later</option>
+                </select>
+              ) : <StageChipInline stage={item.stage} />}
             </div>
+            <div className="meta" style={{ fontSize: 10 }}>Owner</div>
+            {editing ? (
+              <select value={owner} onChange={(e) => setOwner(e.target.value as BacklogItem['owner'])} className="input" style={{ height: 30, padding: '0 8px' }}>
+                <option value="D">Dave</option>
+                <option value="R">Raj</option>
+              </select>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Avatar who={item.owner} size={22} />
+                <span>{FOUNDERS[item.owner].name}</span>
+              </div>
+            )}
             <div className="meta" style={{ fontSize: 10 }}>Product</div>
             <div>
-              <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>
+              {editing ? (
+                <select value={productId} onChange={(e) => setProductId(e.target.value)} className="input" style={{ height: 30, padding: '0 8px' }}>
+                  {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
+                </select>
+              ) : (
+                p && <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>
+              )}
             </div>
             <div className="meta" style={{ fontSize: 10 }}>Due</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-2)' }}>
-              {item.due || '—'}
+            <div>
+              {editing ? (
+                <input
+                  value={due}
+                  onChange={(e) => setDue(e.target.value)}
+                  className="input"
+                  style={{ height: 30, padding: '0 8px', width: 220 }}
+                  placeholder="22 Apr 2026"
+                />
+              ) : (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-2)' }}>
+                  {item.due || '—'}
+                </span>
+              )}
             </div>
           </div>
           <hr className="hr" style={{ margin: '24px 0' }} />
           <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Notes</div>
-          <div style={{ fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
-            {item.note || <span style={{ color: 'var(--fg-4)' }}>No notes yet.</span>}
-          </div>
+          {editing ? (
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="input"
+              style={{ width: '100%', minHeight: 90, padding: '8px 10px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
+            />
+          ) : (
+            <div style={{ fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+              {item.note || <span style={{ color: 'var(--fg-4)' }}>No notes yet.</span>}
+            </div>
+          )}
           <hr className="hr" style={{ margin: '24px 0' }} />
           <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Linked docs</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -360,22 +474,134 @@ function ItemDrawer({ item, onClose, onOpenProduct }: { item: BacklogItem; onClo
               </div>
             ))}
           </div>
-          <hr className="hr" style={{ margin: '24px 0' }} />
-          <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Activity</div>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.7 }}>
-            <div><span style={{ color: 'var(--fg-2)' }}>Dave</span> moved to <b style={{ color: 'var(--fg-1)' }}>{item.stage}</b> · 2d ago</div>
-            <div><span style={{ color: 'var(--fg-2)' }}>Jeff</span> linked this to a doc · 3d ago</div>
-            <div><span style={{ color: 'var(--fg-2)' }}>Raj</span> commented · 5d ago</div>
-          </div>
         </div>
         <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary"><Icon name="edit" size={12} /> Edit</button>
-          <button className="btn btn-ghost" onClick={onOpenProduct}>Open product</button>
+          {editing ? (
+            <>
+              <button className="btn btn-primary" onClick={commit}><Icon name="check" size={12} /> Save</button>
+              <button className="btn btn-ghost" onClick={() => { setTitle(item.title); setNote(item.note ?? ''); setDue(item.due ?? ''); setProductId(item.product); setStage(item.stage); setOwner(item.owner); setEditing(false); }}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-primary" onClick={() => setEditing(true)}><Icon name="edit" size={12} /> Edit</button>
+              <button className="btn btn-ghost" onClick={onOpenProduct}>Open product</button>
+            </>
+          )}
           <div style={{ flex: 1 }} />
-          <button className="btn btn-subtle">Open in backlog.path2ai.tech <Icon name="arrow-up-right" size={12} /></button>
+          {!editing && (
+            <button className="btn btn-subtle" style={{ color: 'var(--danger-fg)' }} onClick={() => { if (confirm(`Delete ${item.id}?`)) onDelete(); }}><Icon name="close" size={12} /> Delete</button>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, onClose, onCreate }: {
+  defaultProduct: string;
+  defaultOwner: FounderKey;
+  products: Product[];
+  existingIds: string[];
+  onClose: () => void;
+  onCreate: (body: { id: string; title: string; product: string; stage: Stage; owner: FounderKey; note?: string | null; due?: string | null }) => void;
+}) {
+  const nextId = useMemo(() => {
+    const ns = existingIds
+      .map((id) => /^PTH-(\d+)$/.exec(id)?.[1])
+      .filter((x): x is string => !!x)
+      .map((x) => parseInt(x, 10));
+    const max = ns.length ? Math.max(...ns) : 200;
+    return `PTH-${max + 1}`;
+  }, [existingIds]);
+
+  const [id, setId] = useState(nextId);
+  const [title, setTitle] = useState('');
+  const [product, setProduct] = useState(defaultProduct);
+  const [stage, setStage] = useState<Stage>('now');
+  const [owner, setOwner] = useState<FounderKey>(defaultOwner);
+  const [note, setNote] = useState('');
+  const [due, setDue] = useState('');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !id.trim() || !product) return;
+    onCreate({
+      id: id.trim(),
+      title: title.trim(),
+      product,
+      stage,
+      owner,
+      note: note || null,
+      due: due || null,
+    });
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,26,0.55)' }} />
+      <form onSubmit={submit} style={{
+        position: 'relative',
+        width: 440,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 10,
+        padding: 24,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        boxShadow: 'var(--shadow-3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: 'var(--fg-1)' }}>New backlog item</h2>
+          <button type="button" onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={14} /></button>
+        </div>
+
+        <Row2 label="ID">
+          <input value={id} onChange={(e) => setId(e.target.value.toUpperCase())} className="input" style={{ width: 140, height: 32 }} />
+        </Row2>
+        <Row2 label="Title">
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" style={{ width: '100%', height: 32 }} />
+        </Row2>
+        <Row2 label="Product">
+          <select value={product} onChange={(e) => setProduct(e.target.value)} className="input" style={{ height: 32, padding: '0 8px' }}>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </Row2>
+        <Row2 label="Stage">
+          <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
+            <option value="now">Now</option>
+            <option value="next">Next</option>
+            <option value="later">Later</option>
+          </select>
+        </Row2>
+        <Row2 label="Owner">
+          <select value={owner} onChange={(e) => setOwner(e.target.value as FounderKey)} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
+            <option value="D">Dave</option>
+            <option value="R">Raj</option>
+          </select>
+        </Row2>
+        <Row2 label="Due">
+          <input value={due} onChange={(e) => setDue(e.target.value)} className="input" style={{ width: 200, height: 32 }} placeholder="e.g. 22 Apr 2026" />
+        </Row2>
+        <Row2 label="Notes">
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} className="input" style={{ width: '100%', minHeight: 60, padding: '8px 10px', fontSize: 13, resize: 'vertical' }} />
+        </Row2>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={!title.trim() || !id.trim()}>Create</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Row2({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'center', gap: 12 }}>
+      <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>{label}</span>
+      <div>{children}</div>
+    </label>
   );
 }
 
