@@ -11,3 +11,4 @@ coverage
 .cache
 tsconfig.tsbuildinfo
 .claude/settings.local.json
+api/data/

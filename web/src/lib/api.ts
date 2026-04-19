@@ -4,10 +4,16 @@ const BASE = '/api';
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const err = new Error(`${res.status} ${res.statusText}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 

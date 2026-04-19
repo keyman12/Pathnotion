@@ -1,10 +1,22 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from './schema.js';
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const url = process.env.DATABASE_URL ?? 'postgres://localhost:5432/pathnotion';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const client = postgres(url, { max: 10 });
+const DB_PATH = process.env.DATABASE_FILE
+  ?? path.resolve(__dirname, '../../data/pathnotion.db');
 
-export const db = drizzle(client, { schema });
-export { schema };
+const dir = path.dirname(DB_PATH);
+if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+export const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+const schemaSql = fs.readFileSync(path.resolve(__dirname, 'schema.sql'), 'utf8');
+db.exec(schemaSql);
+
+export type DB = typeof db;
