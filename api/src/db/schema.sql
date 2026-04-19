@@ -45,9 +45,10 @@ CREATE TABLE IF NOT EXISTS backlog_items (
   subfolder_id  INTEGER REFERENCES subfolders(id) ON DELETE SET NULL,
   stage         TEXT NOT NULL DEFAULT 'now',       -- 'now' | 'next' | 'later'
   owner_key     TEXT NOT NULL,                     -- FK to users.key (not enforced; allows seed D/R)
-  due_date      TEXT,
+  due_date      TEXT,                              -- ISO YYYY-MM-DD preferred (legacy free-text tolerated)
   progress      INTEGER NOT NULL DEFAULT 0,
-  flag          TEXT,                              -- 'overdue' | 'due-soon'
+  effort_days   REAL,                              -- optional t-shirt estimate; used by Gantt later
+  flag          TEXT,                              -- legacy; UI now derives overdue/due-soon from due_date
   age           TEXT,                              -- display-only: '3d', '1w'
   sort_order    INTEGER NOT NULL DEFAULT 0,
   completed_at  TEXT,

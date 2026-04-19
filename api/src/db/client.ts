@@ -19,4 +19,7 @@ db.pragma('foreign_keys = ON');
 const schemaSql = fs.readFileSync(path.resolve(__dirname, 'schema.sql'), 'utf8');
 db.exec(schemaSql);
 
+// Migrations — additive. Each ALTER is wrapped so re-running is a no-op.
+try { db.exec('ALTER TABLE backlog_items ADD COLUMN effort_days REAL'); } catch { /* already present */ }
+
 export type DB = typeof db;

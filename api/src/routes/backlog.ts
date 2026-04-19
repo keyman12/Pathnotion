@@ -16,6 +16,7 @@ const SELECT_BACKLOG = `
          owner_key AS owner,
          due_date AS due,
          progress,
+         effort_days AS effortDays,
          flag,
          age,
          sort_order AS sortOrder,
@@ -45,6 +46,7 @@ const createSchema = z.object({
   due: z.string().nullish(),
   flag: z.enum(['overdue', 'due-soon']).nullish(),
   progress: z.number().int().min(0).max(100).optional(),
+  effortDays: z.number().min(0).nullish(),
 });
 
 backlogRouter.post('/items', (req, res) => {
@@ -53,8 +55,8 @@ backlogRouter.post('/items', (req, res) => {
 
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS n FROM backlog_items').get() as { n: number }).n;
   db.prepare(`
-    INSERT INTO backlog_items (id, title, note, product_id, stage, owner_key, due_date, flag, progress, sort_order)
-    VALUES (@id, @title, @note, @product, @stage, @owner, @due, @flag, @progress, @sort_order)
+    INSERT INTO backlog_items (id, title, note, product_id, stage, owner_key, due_date, flag, progress, effort_days, sort_order)
+    VALUES (@id, @title, @note, @product, @stage, @owner, @due, @flag, @progress, @effortDays, @sort_order)
   `).run({
     id: parsed.data.id,
     title: parsed.data.title,
@@ -65,6 +67,7 @@ backlogRouter.post('/items', (req, res) => {
     due: parsed.data.due ?? null,
     flag: parsed.data.flag ?? null,
     progress: parsed.data.progress ?? 0,
+    effortDays: parsed.data.effortDays ?? null,
     sort_order: maxOrder + 1,
   });
   const row = db.prepare(SELECT_BACKLOG + ' WHERE id = ?').get(parsed.data.id);
@@ -75,11 +78,13 @@ const patchSchema = z.object({
   title: z.string().optional(),
   note: z.string().nullish(),
   product: z.string().optional(),
+  subfolderId: z.number().int().nullish(),
   stage: stageSchema.optional(),
   owner: z.enum(['D', 'R']).optional(),
   due: z.string().nullish(),
   flag: z.enum(['overdue', 'due-soon']).nullish(),
   progress: z.number().int().min(0).max(100).optional(),
+  effortDays: z.number().min(0).nullish(),
   sortOrder: z.number().int().optional(),
   completed: z.boolean().optional(),
 });
@@ -94,11 +99,13 @@ backlogRouter.patch('/items/:id', (req, res) => {
     ['title', 'title = @title'],
     ['note', 'note = @note'],
     ['product', 'product_id = @product'],
+    ['subfolderId', 'subfolder_id = @subfolderId'],
     ['stage', 'stage = @stage'],
     ['owner', 'owner_key = @owner'],
     ['due', 'due_date = @due'],
     ['flag', 'flag = @flag'],
     ['progress', 'progress = @progress'],
+    ['effortDays', 'effort_days = @effortDays'],
     ['sortOrder', 'sort_order = @sortOrder'],
   ];
   for (const [k, sql] of map) {

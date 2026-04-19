@@ -41,9 +41,12 @@ export interface BacklogItem {
   age?: string | null;
   flag?: 'due-soon' | 'overdue' | null;
   progress?: number;
+  effortDays?: number | null;
   sortOrder?: number;
   completedAt?: string | null;
   subfolderId?: number | null;
+  /** Write-only: setting true stamps completedAt = now; false clears it. */
+  completed?: boolean;
 }
 
 export interface Task {

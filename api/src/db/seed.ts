@@ -17,22 +17,22 @@ const PRODUCTS = [
 ];
 
 const BACKLOG = [
-  { id: 'PTH-204', title: 'Clean up / sharpen built screens', product: 'dashboard', stage: 'now', owner: 'D', note: 'Some of the screens are getting messy — wrong layouts', age: '3d' },
-  { id: 'PTH-207', title: 'Version 3 Emulator with battery and over the air management', product: 'emulator', stage: 'now', owner: 'D', age: '5d' },
-  { id: 'PTH-211', title: 'Pricing groups — merchant assignment flow', product: 'dashboard', stage: 'now', owner: 'R', age: '2d', due: '22 Apr 2026' },
-  { id: 'PTH-182', title: 'Amend function', product: 'boarding', stage: 'now', owner: 'D', flag: 'due-soon', due: '20 Apr 2026', age: '10d' },
-  { id: 'PTH-175', title: 'API Readability improvement.', product: 'sdk', stage: 'now', owner: 'D', flag: 'overdue', due: '30 Mar 2026', age: '5d' },
-  { id: 'PTH-189', title: 'Boarding flow: email verify retry', product: 'boarding', stage: 'next', owner: 'R', age: '4d' },
-  { id: 'PTH-212', title: 'SDK: TypeScript type exports', product: 'sdk', stage: 'next', owner: 'D', age: '2d' },
-  { id: 'PTH-221', title: 'MCP server: token refresh bug', product: 'mcp', stage: 'next', owner: 'D', age: '6h' },
-  { id: 'PTH-230', title: 'Dashboard: drill-down filters', product: 'dashboard', stage: 'next', owner: 'D', age: '1w' },
-  { id: 'PTH-231', title: 'Boarding: KYC gate copy pass', product: 'boarding', stage: 'next', owner: 'R', age: '5d' },
-  { id: 'PTH-240', title: 'Emulator: sandbox reset button', product: 'emulator', stage: 'next', owner: 'D', age: '3d' },
-  { id: 'PTH-241', title: 'Invoicing: PDF styling', product: 'invoicing', stage: 'next', owner: 'R', age: '2d' },
-  { id: 'PTH-260', title: 'Dashboard v2: layout system', product: 'dashboard', stage: 'later', owner: 'D' },
-  { id: 'PTH-261', title: 'Boarding: partner co-brand theming', product: 'boarding', stage: 'later', owner: 'R' },
-  { id: 'PTH-270', title: 'MCP: public registry listing', product: 'mcp', stage: 'later', owner: 'D' },
-  { id: 'PTH-271', title: 'Emulator: record+replay mode', product: 'emulator', stage: 'later', owner: 'D' },
+  { id: 'PTH-204', title: 'Clean up / sharpen built screens',                 product: 'dashboard', stage: 'now',   owner: 'D', note: 'Some of the screens are getting messy — wrong layouts', effortDays: 3 },
+  { id: 'PTH-207', title: 'Version 3 Emulator with battery and OTA',          product: 'emulator',  stage: 'now',   owner: 'D', effortDays: 8 },
+  { id: 'PTH-211', title: 'Pricing groups — merchant assignment flow',        product: 'dashboard', stage: 'now',   owner: 'R', due: '2026-04-22', effortDays: 5 },
+  { id: 'PTH-182', title: 'Amend function',                                   product: 'boarding',  stage: 'now',   owner: 'D', due: '2026-04-20', effortDays: 2 },
+  { id: 'PTH-175', title: 'API readability improvement.',                     product: 'sdk',       stage: 'now',   owner: 'D', due: '2026-03-30', effortDays: 1 },
+  { id: 'PTH-189', title: 'Boarding flow: email verify retry',                product: 'boarding',  stage: 'next',  owner: 'R', effortDays: 1 },
+  { id: 'PTH-212', title: 'SDK: TypeScript type exports',                     product: 'sdk',       stage: 'next',  owner: 'D', effortDays: 2 },
+  { id: 'PTH-221', title: 'MCP server: token refresh bug',                    product: 'mcp',       stage: 'next',  owner: 'D', effortDays: 0.5 },
+  { id: 'PTH-230', title: 'Dashboard: drill-down filters',                    product: 'dashboard', stage: 'next',  owner: 'D', effortDays: 4 },
+  { id: 'PTH-231', title: 'Boarding: KYC gate copy pass',                     product: 'boarding',  stage: 'next',  owner: 'R', effortDays: 0.5 },
+  { id: 'PTH-240', title: 'Emulator: sandbox reset button',                   product: 'emulator',  stage: 'next',  owner: 'D', effortDays: 1 },
+  { id: 'PTH-241', title: 'Invoicing: PDF styling',                           product: 'invoicing', stage: 'next',  owner: 'R', effortDays: 1.5 },
+  { id: 'PTH-260', title: 'Dashboard v2: layout system',                      product: 'dashboard', stage: 'later', owner: 'D' },
+  { id: 'PTH-261', title: 'Boarding: partner co-brand theming',               product: 'boarding',  stage: 'later', owner: 'R' },
+  { id: 'PTH-270', title: 'MCP: public registry listing',                     product: 'mcp',       stage: 'later', owner: 'D' },
+  { id: 'PTH-271', title: 'Emulator: record+replay mode',                     product: 'emulator',  stage: 'later', owner: 'D' },
 ];
 
 const TASKS = [
@@ -102,8 +102,8 @@ const upsertProduct = db.prepare(`
 `);
 
 const upsertBacklog = db.prepare(`
-  INSERT INTO backlog_items (id, title, note, product_id, stage, owner_key, due_date, flag, age, sort_order)
-  VALUES (@id, @title, @note, @product, @stage, @owner, @due, @flag, @age, @sort_order)
+  INSERT INTO backlog_items (id, title, note, product_id, stage, owner_key, due_date, flag, age, effort_days, sort_order)
+  VALUES (@id, @title, @note, @product, @stage, @owner, @due, @flag, @age, @effortDays, @sort_order)
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     note = excluded.note,
@@ -113,6 +113,7 @@ const upsertBacklog = db.prepare(`
     due_date = excluded.due_date,
     flag = excluded.flag,
     age = excluded.age,
+    effort_days = excluded.effort_days,
     sort_order = excluded.sort_order
 `);
 
@@ -168,8 +169,9 @@ const run = db.transaction(() => {
       stage: b.stage,
       owner: b.owner,
       due: b.due ?? null,
-      flag: (b as any).flag ?? null,
-      age: b.age ?? null,
+      flag: null,
+      age: null,
+      effortDays: (b as any).effortDays ?? null,
       sort_order: i,
     });
   }

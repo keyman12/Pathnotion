@@ -214,27 +214,37 @@ input, textarea, select, button {
   color: inherit;
   font-family: inherit;
 }
-select.input, select:not([class]) {
-  background: var(--bg-surface);
+/* Any <select> uses theme colours — match all of them, not just .input */
+select {
+  background-color: var(--bg-surface);
   color: var(--fg-1);
   border: 1px solid var(--border-default);
   border-radius: 6px;
   padding: 0 28px 0 10px;
   height: 34px;
   font-size: 13px;
+  line-height: 1;
   appearance: none;
   -webkit-appearance: none;
+  -moz-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 10px 6px;
   cursor: pointer;
 }
+/* Per-option styling is only respected by some browsers (Chrome/Firefox on Windows/Linux;
+   macOS Safari/Chrome still paint the popup via the system picker). On macOS we set
+   color-scheme so the system picker follows the app theme. */
 select option {
-  background: var(--bg-surface);
+  background-color: var(--bg-surface);
   color: var(--fg-1);
 }
-/* Dark-mode time/date inputs — force the native widget to follow the theme */
+select:focus { outline: none; border-color: var(--path-primary); }
+/* Page-level color-scheme so native popups (select, date, time) match */
+:root { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
+/* Belt-and-braces for date/time specifically */
 input[type="time"], input[type="date"], input[type="datetime-local"] {
   color-scheme: light;
 }

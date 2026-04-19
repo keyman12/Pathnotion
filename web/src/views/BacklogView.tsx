@@ -22,6 +22,7 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
   const session = useSession();
   const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
 
@@ -43,16 +44,23 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   };
 
   const filtered = useMemo(() => items.filter((b) => {
+    const isDone = !!b.completedAt;
+    if (isDone && !showCompleted) return false;
     if (productFilter && b.product !== productFilter) return false;
     if (tab === 'mine' && b.owner !== me) return false;
     if (tab === 'raj' && b.owner === me) return false;
-    if (tab === 'flagged' && !b.flag) return false;
+    if (tab === 'flagged') {
+      const flag = computeFlag(toIsoDate(b.due), isDone);
+      if (!flag) return false;
+    }
     if (query) {
       const hay = `${b.title}${b.id}${b.note ?? ''}`.toLowerCase();
       if (!hay.includes(query.toLowerCase())) return false;
     }
     return true;
-  }), [items, productFilter, tab, query, me]);
+  }), [items, productFilter, tab, query, me, showCompleted]);
+
+  const completedCount = items.filter((i) => i.completedAt).length;
 
   const counts = {
     now: filtered.filter((i) => i.stage === 'now').length,
@@ -89,7 +97,14 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
                 style={{ border: 0, outline: 'none', fontFamily: 'var(--font-primary)', fontSize: 13, width: 140, color: 'var(--fg-1)', background: 'transparent' }}
               />
             </div>
-            <button className="btn btn-ghost"><Icon name="filter" size={14} /> Owner</button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowCompleted((v) => !v)}
+              title={showCompleted ? 'Hide completed' : 'Show completed'}
+            >
+              <Icon name={showCompleted ? 'eye' : 'check'} size={14} />
+              {showCompleted ? `Hide done${completedCount ? ` (${completedCount})` : ''}` : `Show done${completedCount ? ` (${completedCount})` : ''}`}
+            </button>
             <div className="btngroup">
               <IconToggle on={layout === 'kanban'} onClick={() => setLayout('kanban')} label="Kanban" icon="grid" />
               <IconToggle on={layout === 'lanes'} onClick={() => setLayout('lanes')} label="Lanes" icon="table" />
@@ -225,6 +240,8 @@ function ProductRow({ product, items, products, subfolders, expandedId, onToggle
 
 function KanbanCell({ item, product, subfolders, onClick }: { item: BacklogItem; product: Product; subfolders: Subfolder[]; onClick: () => void }) {
   const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
+  const isCompleted = !!item.completedAt;
+  const flag = computeFlag(toIsoDate(item.due), isCompleted);
   return (
     <div className="row-hover" onClick={onClick} style={{
       position: 'relative',
@@ -233,26 +250,39 @@ function KanbanCell({ item, product, subfolders, onClick }: { item: BacklogItem;
       borderRadius: 6,
       background: 'var(--bg-surface)',
       cursor: 'pointer',
+      opacity: isCompleted ? 0.6 : 1,
     }}>
       <span style={{ position: 'absolute', left: 0, top: 4, bottom: 4, width: 2, background: product.color, borderRadius: '0 2px 2px 0' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: 'var(--fg-4)' }}>{item.id}</span>
-        {item.flag === 'overdue' && <span className="chip chip-overdue" style={{ fontSize: 9.5, padding: '1px 6px' }}>Overdue</span>}
-        {item.flag === 'due-soon' && <span className="chip chip-due" style={{ fontSize: 9.5, padding: '1px 6px' }}>Due soon</span>}
+        {flag === 'overdue' && <span className="chip chip-overdue" style={{ fontSize: 9.5, padding: '1px 6px' }}>Overdue</span>}
+        {flag === 'due-soon' && <span className="chip chip-due" style={{ fontSize: 9.5, padding: '1px 6px' }}>Due soon</span>}
+        {isCompleted && <span className="chip chip-later" style={{ fontSize: 9.5, padding: '1px 6px' }}>Done</span>}
       </div>
-      <div style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35 }}>{item.title}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35, textDecoration: isCompleted ? 'line-through' : 'none' }}>{item.title}</div>
       {sf && <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>/ {sf.name}</div>}
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {item.due
-          ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{item.due}</span>
+          ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{formatDue(item.due)}</span>
           : <span />}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
+          {item.effortDays != null && <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>{item.effortDays}d</span>}
           <Avatar who={item.owner} size={18} />
         </div>
       </div>
     </div>
   );
+}
+
+function formatDue(s: string | null | undefined): string {
+  if (!s) return '';
+  // Render ISO as "22 Apr 2026" for card display
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+  return s;
 }
 
 function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
@@ -296,6 +326,8 @@ function BacklogList({ items, products, subfolders, expandedId, onToggle, onPatc
 function BacklogRow({ item, products, subfolders, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; subfolders: Subfolder[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
   const p = products.find((x) => x.id === item.product);
   const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
+  const isCompleted = !!item.completedAt;
+  const flag = computeFlag(toIsoDate(item.due), isCompleted);
   if (!p) return null;
   return (
     <div onClick={onClick} className="row-hover" style={{
@@ -308,6 +340,7 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
       borderRadius: 6,
       border: '1px solid var(--border-subtle)',
       cursor: 'pointer',
+      opacity: isCompleted ? 0.6 : 1,
     }}>
       <span style={{ position: 'absolute', left: 0, top: 6, bottom: 6, width: 3, background: p.color, borderRadius: '0 3px 3px 0' }} />
       <Icon name="drag" size={14} color="var(--fg-4)" style={{ marginTop: 2 }} />
@@ -321,19 +354,26 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
             </span>
           )}
           {item.due && (
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>
-              · {item.due}{item.age ? ` · ${item.age}` : ''}
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>
+              · {formatDue(item.due)}
             </span>
           )}
+          {item.effortDays != null && (
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>· {item.effortDays}d</span>
+          )}
         </div>
-        <div style={{ fontSize: 14, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35 }}>{item.title}</div>
+        <div style={{ fontSize: 14, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35, textDecoration: isCompleted ? 'line-through' : 'none' }}>{item.title}</div>
         {item.note && !compact && (
           <div style={{ fontSize: 12.5, color: 'var(--fg-3)', marginTop: 3, lineHeight: 1.45 }}>{item.note}</div>
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
-        <StageChipInline stage={item.stage} flag={item.flag} />
+        {isCompleted ? (
+          <span className="chip chip-later">Done</span>
+        ) : (
+          <StageChipInline stage={item.stage} flag={flag} />
+        )}
         <Avatar who={item.owner} size={22} />
       </div>
     </div>
@@ -341,14 +381,14 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
 }
 
 // Inline editor — replaces the card when expanded. Auto-saves on change.
-function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete, density }: {
+function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete }: {
   item: BacklogItem;
   products: Product[];
   subfolders: Subfolder[];
   onCollapse: () => void;
   onPatch: (patch: Partial<BacklogItem>) => void;
   onDelete: () => void;
-  density: 'compact' | 'roomy';
+  density?: 'compact' | 'roomy'; // kept for call-site compatibility; layout is now always the same
 }) {
   const p = products.find((x) => x.id === item.product);
   const productSubfolders = subfolders.filter((sf) => sf.productId === item.product);
@@ -356,14 +396,10 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
   // Local mirrors for text inputs so typing doesn't fire a request on every keystroke — saved on blur.
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note ?? '');
-  const [due, setDue] = useState(item.due ?? '');
+  const [dueIso, setDueIso] = useState<string>(toIsoDate(item.due));
 
-  const saveIfChanged = (key: keyof BacklogItem, val: string, original: string | null | undefined) => {
-    if ((val || null) === (original || null)) return;
-    onPatch({ [key]: val || null } as Partial<BacklogItem>);
-  };
-
-  const colCount = density === 'compact' ? 1 : 2;
+  const flag = computeFlag(dueIso, !!item.completedAt);
+  const isCompleted = !!item.completedAt;
 
   return (
     <div style={{
@@ -385,7 +421,7 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           alignItems: 'center',
           gap: 10,
           width: '100%',
-          padding: '10px 12px 10px 16px',
+          padding: '10px 12px 10px 18px',
           background: 'var(--bg-sunken)',
           border: 0,
           borderBottom: '1px solid var(--border-subtle)',
@@ -394,31 +430,40 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           color: 'inherit',
         }}
       >
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{item.id}</span>
-        {p && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: p.color, fontWeight: 500 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
-          {p.label}
-        </span>}
-        <StageChipInline stage={item.stage} flag={item.flag} />
-        <div style={{ flex: 1 }} />
-        <Avatar who={item.owner} size={20} />
-        <Icon name="chevron-up" size={14} color="var(--fg-3)" />
+        <span style={{ fontSize: 14, color: 'var(--fg-1)', fontWeight: 500, flex: 1, textAlign: 'left', textDecoration: isCompleted ? 'line-through' : 'none', opacity: isCompleted ? 0.7 : 1 }}>
+          {item.title}
+        </span>
+        <FlagOrStage flag={flag} stage={item.stage} />
+        <Icon name="close" size={14} color="var(--fg-3)" />
       </button>
 
-      {/* Body — edit fields; each auto-saves on blur/change */}
-      <div style={{ padding: density === 'compact' ? '10px 12px' : '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => saveIfChanged('title', title.trim(), item.title)}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          placeholder="Title"
-          className="input"
-          style={{ width: '100%', height: 34, fontWeight: 500 }}
-        />
+      {/* Body */}
+      <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <FieldLabel label="Title">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => { if (title.trim() && title !== item.title) onPatch({ title: title.trim() }); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className="input"
+            style={{ width: '100%', height: 36 }}
+          />
+        </FieldLabel>
 
-        <div style={{ display: 'grid', gridTemplateColumns: colCount === 2 ? '1fr 1fr' : '1fr', gap: 8 }}>
-          <FieldRow label="Stage">
+        <FieldLabel label="Description">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={() => { if (note !== (item.note ?? '')) onPatch({ note: note || null }); }}
+            className="input"
+            style={{ width: '100%', minHeight: 96, padding: '10px 12px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
+            placeholder="What's this about?"
+          />
+        </FieldLabel>
+
+        {/* Priority / Due / Progress / Effort — 4-column row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
+          <FieldLabel label="Priority">
             <select
               value={item.stage}
               onChange={(e) => onPatch({ stage: e.target.value as Stage })}
@@ -428,8 +473,57 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               <option value="next">Next</option>
               <option value="later">Later</option>
             </select>
-          </FieldRow>
-          <FieldRow label="Owner">
+          </FieldLabel>
+
+          <FieldLabel label="Due date">
+            <input
+              type="date"
+              value={dueIso}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDueIso(v);
+                onPatch({ due: v || null });
+              }}
+              className="input"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+          </FieldLabel>
+
+          <FieldLabel label="Progress %">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={5}
+              value={item.progress ?? 0}
+              onChange={(e) => {
+                const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                if (v !== (item.progress ?? 0)) onPatch({ progress: v });
+              }}
+              className="input"
+            />
+          </FieldLabel>
+
+          <FieldLabel label="Effort (days)">
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              placeholder="—"
+              value={item.effortDays ?? ''}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const v = raw === '' ? null : Math.max(0, parseFloat(raw));
+                if ((v ?? null) !== (item.effortDays ?? null)) onPatch({ effortDays: v });
+              }}
+              className="input"
+            />
+          </FieldLabel>
+        </div>
+
+        {/* Owner / Product / Sub-folder — secondary row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
+          <FieldLabel label="Owner">
             <select
               value={item.owner}
               onChange={(e) => onPatch({ owner: e.target.value as BacklogItem['owner'] })}
@@ -438,8 +532,9 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               <option value="D">Dave</option>
               <option value="R">Raj</option>
             </select>
-          </FieldRow>
-          <FieldRow label="Product">
+          </FieldLabel>
+
+          <FieldLabel label="Product">
             <select
               value={item.product}
               onChange={(e) => onPatch({ product: e.target.value, subfolderId: null })}
@@ -447,8 +542,9 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
             >
               {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
             </select>
-          </FieldRow>
-          <FieldRow label="Sub-folder">
+          </FieldLabel>
+
+          <FieldLabel label="Sub-folder">
             <select
               value={item.subfolderId ?? ''}
               onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
@@ -458,73 +554,77 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders'}</option>
               {productSubfolders.map((sf) => <option key={sf.id} value={sf.id}>{sf.name}</option>)}
             </select>
-          </FieldRow>
-          <FieldRow label="Due">
-            <input
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-              onBlur={() => saveIfChanged('due', due.trim(), item.due)}
-              className="input"
-              placeholder="e.g. 22 Apr 2026"
-            />
-          </FieldRow>
-          <FieldRow label="Flag">
-            <select
-              value={item.flag ?? ''}
-              onChange={(e) => onPatch({ flag: (e.target.value || null) as BacklogItem['flag'] })}
-              className="input"
-            >
-              <option value="">— none —</option>
-              <option value="due-soon">Due soon</option>
-              <option value="overdue">Overdue</option>
-            </select>
-          </FieldRow>
+          </FieldLabel>
         </div>
 
-        <FieldRow label="Progress">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              defaultValue={item.progress ?? 0}
-              onChange={(e) => {/* live preview only */}}
-              onPointerUp={(e) => {
-                const v = parseInt((e.currentTarget as HTMLInputElement).value, 10);
-                if (v !== (item.progress ?? 0)) onPatch({ progress: v });
-              }}
-              style={{ flex: 1 }}
-            />
-            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{item.progress ?? 0}%</span>
-          </div>
-        </FieldRow>
-
-        <FieldRow label="Notes">
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={() => saveIfChanged('note', note, item.note)}
-            className="input"
-            style={{ width: '100%', minHeight: 72, padding: '8px 10px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
-            placeholder="Notes…"
-          />
-        </FieldRow>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', borderTop: '1px solid var(--border-subtle)', paddingTop: 14, marginTop: 4 }}>
           <button
             type="button"
-            className="btn btn-subtle"
-            style={{ color: 'var(--danger-fg)', padding: '6px 10px', fontSize: 12 }}
+            className="btn"
+            style={{
+              padding: '8px 14px',
+              fontSize: 13,
+              background: isCompleted ? 'var(--bg-sunken)' : 'var(--bg-hover)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--fg-1)',
+            }}
+            onClick={() => onPatch({ completed: !isCompleted })}
+          >
+            {isCompleted ? 'Re-open' : 'Mark complete'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: '8px 14px', fontSize: 13, background: 'var(--bg-hover)', border: '1px solid var(--border-default)', color: 'var(--fg-1)' }}
             onClick={() => { if (confirm(`Delete ${item.id}?`)) onDelete(); }}
           >
-            <Icon name="close" size={12} /> Delete
+            Delete
           </button>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>Changes save automatically</span>
+          <div style={{ flex: 1 }} />
+          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.id} · changes save automatically</span>
         </div>
       </div>
     </div>
   );
+}
+
+function FlagOrStage({ flag, stage }: { flag: 'overdue' | 'due-soon' | null; stage: Stage }) {
+  if (flag === 'overdue') return <span className="chip chip-overdue">Overdue</span>;
+  if (flag === 'due-soon') return <span className="chip chip-due">Due soon</span>;
+  const cls = stage === 'now' ? 'chip-now' : stage === 'next' ? 'chip-next' : 'chip-later';
+  const label = stage === 'now' ? 'Now' : stage === 'next' ? 'Next' : 'Later';
+  return <span className={`chip ${cls}`}>{label}</span>;
+}
+
+function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// Convert various stored due formats to ISO YYYY-MM-DD (or "" if unparseable).
+function toIsoDate(s: string | null | undefined): string {
+  if (!s) return '';
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function computeFlag(dueIso: string, completed: boolean): 'overdue' | 'due-soon' | null {
+  if (completed || !dueIso) return null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const due = new Date(dueIso);
+  if (isNaN(due.getTime())) return null;
+  const days = (due.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+  if (days < 0) return 'overdue';
+  if (days <= 5) return 'due-soon';
+  return null;
 }
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
