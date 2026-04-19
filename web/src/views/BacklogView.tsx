@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
-import { FOUNDERS, PRODUCT_DOCS } from '../lib/seed';
 import type { BacklogItem, FounderKey, Stage } from '../lib/types';
-import { useUI } from '../lib/store';
-import { useBacklog, useCreateBacklog, useDeleteBacklog, usePatchBacklog, useProducts } from '../lib/queries';
+import { useBacklog, useCreateBacklog, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
 import { useSession } from '../lib/useSession';
+import type { Subfolder } from '../lib/api';
 
 type Layout = 'kanban' | 'lanes' | 'list';
 type OwnerFilter = 'global' | 'mine' | 'raj' | 'flagged';
@@ -21,20 +20,27 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   const [layout, setLayout] = useState<Layout>('kanban');
   const [tab, setTab] = useState<OwnerFilter>('global');
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<BacklogItem | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
-  const navigate = useUI((s) => s.navigate);
   const session = useSession();
   const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
 
   const backlogQ = useBacklog();
   const productsQ = useProducts();
+  const subfoldersQ = useSubfolders();
   const createBacklog = useCreateBacklog();
   const patchBacklog = usePatchBacklog();
   const deleteBacklog = useDeleteBacklog();
 
   const items = backlogQ.data ?? [];
   const products = productsQ.data ?? [];
+  const subfolders = subfoldersQ.data ?? [];
+
+  const patch = (id: string, p: Partial<BacklogItem>) => patchBacklog.mutate({ id, patch: p });
+  const remove = (id: string) => {
+    deleteBacklog.mutate(id);
+    setExpandedId(null);
+  };
 
   const filtered = useMemo(() => items.filter((b) => {
     if (productFilter && b.product !== productFilter) return false;
@@ -95,20 +101,9 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
         tabs={tabs ? <BacklogTabs value={tab} onChange={setTab} tabs={tabs} /> : undefined}
       />
 
-      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} onItemClick={setSelected} productFilter={productFilter ?? null} />}
-      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} onItemClick={setSelected} />}
-      {layout === 'list' && <BacklogList items={filtered} products={products} onItemClick={setSelected} />}
-
-      {selected && (
-        <ItemDrawer
-          item={selected}
-          products={products}
-          onClose={() => setSelected(null)}
-          onOpenProduct={() => { navigate(`product:${selected.product}`); setSelected(null); }}
-          onPatch={(patch) => patchBacklog.mutate({ id: selected.id, patch }, { onSuccess: (row) => setSelected((curr) => curr && curr.id === selected.id ? row : curr) })}
-          onDelete={() => { deleteBacklog.mutate(selected.id); setSelected(null); }}
-        />
-      )}
+      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} subfolders={subfolders} productFilter={productFilter ?? null} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
+      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
+      {layout === 'list' && <BacklogList items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
 
       {showNew && (
         <NewItemDialog
@@ -153,7 +148,17 @@ function BacklogTabs({ value, onChange, tabs }: { value: OwnerFilter; onChange: 
 
 type Product = { id: string; label: string; color: string; accent?: string; count?: number };
 
-function BacklogKanban({ items, products, onItemClick, productFilter }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void; productFilter: string | null }) {
+interface LayoutProps {
+  items: BacklogItem[];
+  products: Product[];
+  subfolders: Subfolder[];
+  expandedId: string | null;
+  onToggle: (id: string) => void;
+  onPatch: (id: string, patch: Partial<BacklogItem>) => void;
+  onDelete: (id: string) => void;
+}
+
+function BacklogKanban({ items, products, subfolders, productFilter, expandedId, onToggle, onPatch, onDelete }: LayoutProps & { productFilter: string | null }) {
   const prods = productFilter ? products.filter((p) => p.id === productFilter) : products;
   return (
     <div style={{
@@ -175,13 +180,13 @@ function BacklogKanban({ items, products, onItemClick, productFilter }: { items:
         </div>
       ))}
       {prods.map((p) => (
-        <Row key={p.id} product={p} items={items} onItemClick={onItemClick} />
+        <ProductRow key={p.id} product={p} items={items} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={onToggle} onPatch={onPatch} onDelete={onDelete} />
       ))}
     </div>
   );
 }
 
-function Row({ product, items, onItemClick }: { product: Product; items: BacklogItem[]; onItemClick: (i: BacklogItem) => void }) {
+function ProductRow({ product, items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: { product: Product } & LayoutProps) {
   const rowItems = items.filter((i) => i.product === product.id);
   return (
     <>
@@ -206,23 +211,11 @@ function Row({ product, items, onItemClick }: { product: Product; items: Backlog
           }}>
             {cell.length === 0
               ? <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', padding: '8px 4px' }}>—</div>
-              : cell.map((i) => <KanbanCell key={i.id} item={i} product={product} onClick={() => onItemClick(i)} />)}
-            <button style={{
-              background: 'transparent',
-              border: '1px dashed var(--border-default)',
-              borderRadius: 6,
-              padding: '5px 8px',
-              fontSize: 11,
-              color: 'var(--fg-4)',
-              fontFamily: 'var(--font-primary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              justifyContent: 'center',
-            }}>
-              <Icon name="plus" size={11} /> Add
-            </button>
+              : cell.map((i) => (
+                  expandedId === i.id
+                    ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                    : <KanbanCell key={i.id} item={i} product={product} subfolders={subfolders} onClick={() => onToggle(i.id)} />
+                ))}
           </div>
         );
       })}
@@ -230,7 +223,8 @@ function Row({ product, items, onItemClick }: { product: Product; items: Backlog
   );
 }
 
-function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: Product; onClick: () => void }) {
+function KanbanCell({ item, product, subfolders, onClick }: { item: BacklogItem; product: Product; subfolders: Subfolder[]; onClick: () => void }) {
+  const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
   return (
     <div className="row-hover" onClick={onClick} style={{
       position: 'relative',
@@ -247,17 +241,21 @@ function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: Pr
         {item.flag === 'due-soon' && <span className="chip chip-due" style={{ fontSize: 9.5, padding: '1px 6px' }}>Due soon</span>}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35 }}>{item.title}</div>
+      {sf && <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>/ {sf.name}</div>}
       <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {item.due
           ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{item.due}</span>
           : <span />}
-        <Avatar who={item.owner} size={18} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
+          <Avatar who={item.owner} size={18} />
+        </div>
       </div>
     </div>
   );
 }
 
-function BacklogLanes({ items, products, onItemClick }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void }) {
+function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
       {STAGES.map((s) => {
@@ -271,7 +269,11 @@ function BacklogLanes({ items, products, onItemClick }: { items: BacklogItem[]; 
               <div style={{ flex: 1 }} />
               <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{s.note}</span>
             </div>
-            {col.map((i) => <BacklogRow key={i.id} item={i} products={products} onClick={() => onItemClick(i)} compact />)}
+            {col.map((i) => (
+              expandedId === i.id
+                ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} compact />
+            ))}
           </div>
         );
       })}
@@ -279,16 +281,21 @@ function BacklogLanes({ items, products, onItemClick }: { items: BacklogItem[]; 
   );
 }
 
-function BacklogList({ items, products, onItemClick }: { items: BacklogItem[]; products: Product[]; onItemClick: (i: BacklogItem) => void }) {
+function BacklogList({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.map((i) => <BacklogRow key={i.id} item={i} products={products} onClick={() => onItemClick(i)} />)}
+      {items.map((i) => (
+        expandedId === i.id
+          ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="roomy" />
+          : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} />
+      ))}
     </div>
   );
 }
 
-function BacklogRow({ item, products, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
+function BacklogRow({ item, products, subfolders, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; subfolders: Subfolder[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
   const p = products.find((x) => x.id === item.product);
+  const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
   if (!p) return null;
   return (
     <div onClick={onClick} className="row-hover" style={{
@@ -305,12 +312,12 @@ function BacklogRow({ item, products, onClick, compact, showProduct = true }: { 
       <span style={{ position: 'absolute', left: 0, top: 6, bottom: 6, width: 3, background: p.color, borderRadius: '0 3px 3px 0' }} />
       <Icon name="drag" size={14} color="var(--fg-4)" style={{ marginTop: 2 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3, flexWrap: 'wrap' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-4)', letterSpacing: '0.02em' }}>{item.id}</span>
           {showProduct && (
             <span className="tag" style={{ color: p.color }}>
               <span className="tag-dot" style={{ background: p.color }} />
-              {p.label}
+              {p.label}{sf ? ` / ${sf.name}` : ''}
             </span>
           )}
           {item.due && (
@@ -325,10 +332,207 @@ function BacklogRow({ item, products, onClick, compact, showProduct = true }: { 
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
         <StageChipInline stage={item.stage} flag={item.flag} />
         <Avatar who={item.owner} size={22} />
       </div>
     </div>
+  );
+}
+
+// Inline editor — replaces the card when expanded. Auto-saves on change.
+function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete, density }: {
+  item: BacklogItem;
+  products: Product[];
+  subfolders: Subfolder[];
+  onCollapse: () => void;
+  onPatch: (patch: Partial<BacklogItem>) => void;
+  onDelete: () => void;
+  density: 'compact' | 'roomy';
+}) {
+  const p = products.find((x) => x.id === item.product);
+  const productSubfolders = subfolders.filter((sf) => sf.productId === item.product);
+
+  // Local mirrors for text inputs so typing doesn't fire a request on every keystroke — saved on blur.
+  const [title, setTitle] = useState(item.title);
+  const [note, setNote] = useState(item.note ?? '');
+  const [due, setDue] = useState(item.due ?? '');
+
+  const saveIfChanged = (key: keyof BacklogItem, val: string, original: string | null | undefined) => {
+    if ((val || null) === (original || null)) return;
+    onPatch({ [key]: val || null } as Partial<BacklogItem>);
+  };
+
+  const colCount = density === 'compact' ? 1 : 2;
+
+  return (
+    <div style={{
+      position: 'relative',
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--path-primary-light-2)',
+      borderRadius: 8,
+      boxShadow: 'var(--shadow-2)',
+      overflow: 'hidden',
+    }}>
+      {p && <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: p.color }} />}
+      {/* Header — click to collapse */}
+      <button
+        type="button"
+        onClick={onCollapse}
+        title="Click to close"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          padding: '10px 12px 10px 16px',
+          background: 'var(--bg-sunken)',
+          border: 0,
+          borderBottom: '1px solid var(--border-subtle)',
+          cursor: 'pointer',
+          textAlign: 'left',
+          color: 'inherit',
+        }}
+      >
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{item.id}</span>
+        {p && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: p.color, fontWeight: 500 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />
+          {p.label}
+        </span>}
+        <StageChipInline stage={item.stage} flag={item.flag} />
+        <div style={{ flex: 1 }} />
+        <Avatar who={item.owner} size={20} />
+        <Icon name="chevron-up" size={14} color="var(--fg-3)" />
+      </button>
+
+      {/* Body — edit fields; each auto-saves on blur/change */}
+      <div style={{ padding: density === 'compact' ? '10px 12px' : '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => saveIfChanged('title', title.trim(), item.title)}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          placeholder="Title"
+          className="input"
+          style={{ width: '100%', height: 34, fontWeight: 500 }}
+        />
+
+        <div style={{ display: 'grid', gridTemplateColumns: colCount === 2 ? '1fr 1fr' : '1fr', gap: 8 }}>
+          <FieldRow label="Stage">
+            <select
+              value={item.stage}
+              onChange={(e) => onPatch({ stage: e.target.value as Stage })}
+              className="input"
+            >
+              <option value="now">Now</option>
+              <option value="next">Next</option>
+              <option value="later">Later</option>
+            </select>
+          </FieldRow>
+          <FieldRow label="Owner">
+            <select
+              value={item.owner}
+              onChange={(e) => onPatch({ owner: e.target.value as BacklogItem['owner'] })}
+              className="input"
+            >
+              <option value="D">Dave</option>
+              <option value="R">Raj</option>
+            </select>
+          </FieldRow>
+          <FieldRow label="Product">
+            <select
+              value={item.product}
+              onChange={(e) => onPatch({ product: e.target.value, subfolderId: null })}
+              className="input"
+            >
+              {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
+            </select>
+          </FieldRow>
+          <FieldRow label="Sub-folder">
+            <select
+              value={item.subfolderId ?? ''}
+              onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
+              disabled={!productSubfolders.length}
+              className="input"
+            >
+              <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders'}</option>
+              {productSubfolders.map((sf) => <option key={sf.id} value={sf.id}>{sf.name}</option>)}
+            </select>
+          </FieldRow>
+          <FieldRow label="Due">
+            <input
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              onBlur={() => saveIfChanged('due', due.trim(), item.due)}
+              className="input"
+              placeholder="e.g. 22 Apr 2026"
+            />
+          </FieldRow>
+          <FieldRow label="Flag">
+            <select
+              value={item.flag ?? ''}
+              onChange={(e) => onPatch({ flag: (e.target.value || null) as BacklogItem['flag'] })}
+              className="input"
+            >
+              <option value="">— none —</option>
+              <option value="due-soon">Due soon</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </FieldRow>
+        </div>
+
+        <FieldRow label="Progress">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              defaultValue={item.progress ?? 0}
+              onChange={(e) => {/* live preview only */}}
+              onPointerUp={(e) => {
+                const v = parseInt((e.currentTarget as HTMLInputElement).value, 10);
+                if (v !== (item.progress ?? 0)) onPatch({ progress: v });
+              }}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{item.progress ?? 0}%</span>
+          </div>
+        </FieldRow>
+
+        <FieldRow label="Notes">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onBlur={() => saveIfChanged('note', note, item.note)}
+            className="input"
+            style={{ width: '100%', minHeight: 72, padding: '8px 10px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
+            placeholder="Notes…"
+          />
+        </FieldRow>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+          <button
+            type="button"
+            className="btn btn-subtle"
+            style={{ color: 'var(--danger-fg)', padding: '6px 10px', fontSize: 12 }}
+            onClick={() => { if (confirm(`Delete ${item.id}?`)) onDelete(); }}
+          >
+            <Icon name="close" size={12} /> Delete
+          </button>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>Changes save automatically</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span className="meta" style={{ fontSize: 9.5 }}>{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -340,188 +544,6 @@ function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'du
   return <span className={`chip ${cls}`}>{label}</span>;
 }
 
-function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete }: {
-  item: BacklogItem;
-  products: Product[];
-  onClose: () => void;
-  onOpenProduct: () => void;
-  onPatch: (patch: Partial<BacklogItem>) => void;
-  onDelete: () => void;
-}) {
-  const p = products.find((x) => x.id === item.product);
-  const docs = PRODUCT_DOCS.filter((d) => d.product === item.product).slice(0, 2);
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(item.title);
-  const [note, setNote] = useState(item.note ?? '');
-  const [due, setDue] = useState(item.due ?? '');
-  const [productId, setProductId] = useState(item.product);
-  const [stage, setStage] = useState<Stage>(item.stage);
-  const [owner, setOwner] = useState<BacklogItem['owner']>(item.owner);
-  const [progress, setProgress] = useState<number>(item.progress ?? 0);
-
-  const commit = () => {
-    const patch: Partial<BacklogItem> = {};
-    if (title.trim() && title !== item.title) patch.title = title.trim();
-    if ((note || null) !== (item.note || null)) patch.note = note || null;
-    if ((due || null) !== (item.due || null)) patch.due = due || null;
-    if (productId !== item.product) patch.product = productId;
-    if (stage !== item.stage) patch.stage = stage;
-    if (owner !== item.owner) patch.owner = owner;
-    if (progress !== (item.progress ?? 0)) patch.progress = progress;
-    if (Object.keys(patch).length) onPatch(patch);
-    setEditing(false);
-  };
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 30 }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(30,30,30,0.35)' }} />
-      <div style={{
-        position: 'absolute', top: 0, bottom: 0, right: 0, width: 520,
-        background: 'var(--bg-surface)',
-        boxShadow: 'var(--shadow-3)',
-        display: 'flex', flexDirection: 'column',
-        animation: 'slideIn 180ms ease',
-      }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-4)' }}>{item.id}</span>
-          {p && <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>}
-          <div style={{ flex: 1 }} />
-          <StageChipInline stage={item.stage} flag={item.flag} />
-          <button onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={14} /></button>
-        </div>
-        <div style={{ padding: '24px 28px', overflowY: 'auto', flex: 1 }}>
-          {editing ? (
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-              className="input"
-              style={{ width: '100%', fontSize: 18, fontWeight: 600, height: 40 }}
-            />
-          ) : (
-            <h2 onDoubleClick={() => setEditing(true)} style={{ fontSize: 22, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 12px', letterSpacing: '-0.005em' }}>{item.title}</h2>
-          )}
-          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 10, columnGap: 16, fontSize: 13, marginTop: 16, alignItems: 'center' }}>
-            <div className="meta" style={{ fontSize: 10 }}>Stage</div>
-            <div>
-              {editing ? (
-                <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className="input" style={{ height: 30, padding: '0 8px' }}>
-                  <option value="now">Now</option>
-                  <option value="next">Next</option>
-                  <option value="later">Later</option>
-                </select>
-              ) : <StageChipInline stage={item.stage} />}
-            </div>
-            <div className="meta" style={{ fontSize: 10 }}>Owner</div>
-            {editing ? (
-              <select value={owner} onChange={(e) => setOwner(e.target.value as BacklogItem['owner'])} className="input" style={{ height: 30, padding: '0 8px' }}>
-                <option value="D">Dave</option>
-                <option value="R">Raj</option>
-              </select>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Avatar who={item.owner} size={22} />
-                <span>{FOUNDERS[item.owner].name}</span>
-              </div>
-            )}
-            <div className="meta" style={{ fontSize: 10 }}>Product</div>
-            <div>
-              {editing ? (
-                <select value={productId} onChange={(e) => setProductId(e.target.value)} className="input" style={{ height: 30, padding: '0 8px' }}>
-                  {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
-                </select>
-              ) : (
-                p && <span className="tag" style={{ color: p.color }}><span className="tag-dot" style={{ background: p.color }} />{p.label}</span>
-              )}
-            </div>
-            <div className="meta" style={{ fontSize: 10 }}>Due</div>
-            <div>
-              {editing ? (
-                <input
-                  value={due}
-                  onChange={(e) => setDue(e.target.value)}
-                  className="input"
-                  style={{ height: 30, padding: '0 8px', width: 220 }}
-                  placeholder="22 Apr 2026"
-                />
-              ) : (
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: item.flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-2)' }}>
-                  {item.due || '—'}
-                </span>
-              )}
-            </div>
-            <div className="meta" style={{ fontSize: 10 }}>Progress</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {editing ? (
-                <>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={progress}
-                    onChange={(e) => setProgress(parseInt(e.target.value, 10))}
-                    style={{ flex: 1 }}
-                  />
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{progress}%</span>
-                </>
-              ) : (
-                <>
-                  <div style={{ flex: 1, height: 6, background: 'var(--bg-sunken)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${item.progress ?? 0}%`, background: 'var(--path-primary)' }} />
-                  </div>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{item.progress ?? 0}%</span>
-                </>
-              )}
-            </div>
-          </div>
-          <hr className="hr" style={{ margin: '24px 0' }} />
-          <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Notes</div>
-          {editing ? (
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              className="input"
-              style={{ width: '100%', minHeight: 90, padding: '8px 10px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
-            />
-          ) : (
-            <div style={{ fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
-              {item.note || <span style={{ color: 'var(--fg-4)' }}>No notes yet.</span>}
-            </div>
-          )}
-          <hr className="hr" style={{ margin: '24px 0' }} />
-          <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Linked docs</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {docs.length === 0 && <div style={{ fontSize: 13, color: 'var(--fg-4)' }}>No docs linked.</div>}
-            {docs.map((d) => (
-              <div key={d.id} className="row-hover" style={{ padding: '8px 10px', border: '1px solid var(--border-subtle)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                <Icon name="file" size={14} color="var(--fg-3)" />
-                <span style={{ flex: 1, fontSize: 13, color: 'var(--fg-2)' }}>{d.title}</span>
-                <span className="meta" style={{ fontSize: 10 }}>{d.updated}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 8 }}>
-          {editing ? (
-            <>
-              <button className="btn btn-primary" onClick={commit}><Icon name="check" size={12} /> Save</button>
-              <button className="btn btn-ghost" onClick={() => { setTitle(item.title); setNote(item.note ?? ''); setDue(item.due ?? ''); setProductId(item.product); setStage(item.stage); setOwner(item.owner); setProgress(item.progress ?? 0); setEditing(false); }}>Cancel</button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-primary" onClick={() => setEditing(true)}><Icon name="edit" size={12} /> Edit</button>
-              <button className="btn btn-ghost" onClick={onOpenProduct}>Open product</button>
-            </>
-          )}
-          <div style={{ flex: 1 }} />
-          {!editing && (
-            <button className="btn btn-subtle" style={{ color: 'var(--danger-fg)' }} onClick={() => { if (confirm(`Delete ${item.id}?`)) onDelete(); }}><Icon name="close" size={12} /> Delete</button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, onClose, onCreate }: {
   defaultProduct: string;

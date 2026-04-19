@@ -162,6 +162,32 @@ export function useResetUserPassword() {
   });
 }
 
+// Products CRUD
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.productsCrud.create>[0]) => api.productsCrud.create(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+  });
+}
+export function usePatchProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Parameters<typeof api.productsCrud.patch>[1] }) => api.productsCrud.patch(args.id, args.patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+  });
+}
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.productsCrud.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['backlog'] });
+    },
+  });
+}
+
 // Business categories
 export function useBusinessCategories() {
   return useQuery({ queryKey: ['business-categories'], queryFn: () => api.businessCategories.list(), staleTime: 5 * 60_000 });

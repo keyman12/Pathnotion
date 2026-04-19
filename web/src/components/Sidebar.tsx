@@ -15,7 +15,6 @@ const WORKSPACE: NavLink[] = [
   { route: 'docs', label: 'Documentation', icon: 'docs' },
   { route: 'tasks', label: 'Tasks', icon: 'tasks' },
   { route: 'calendar', label: 'Calendar', icon: 'calendar' },
-  { route: 'reports', label: 'Reports', icon: 'trend-up' },
   { route: 'jeff', label: 'Jeff', icon: 'agent', badge: 'AGENT' },
 ];
 

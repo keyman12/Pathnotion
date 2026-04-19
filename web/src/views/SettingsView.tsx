@@ -5,13 +5,16 @@ import { Icon } from '../components/Icon';
 import {
   useBusinessCategories,
   useCreateBusinessCategory,
+  useCreateProduct,
   useCreateSubfolder,
   useCreateUser,
   useDeleteBusinessCategory,
+  useDeleteProduct,
   useDeleteSubfolder,
   useNotificationPrefs,
   usePatchBusinessCategory,
   usePatchNotificationPrefs,
+  usePatchProduct,
   usePatchSubfolder,
   usePatchUser,
   useProducts,
@@ -22,8 +25,9 @@ import {
 } from '../lib/queries';
 import { useSession } from '../lib/useSession';
 import type { BusinessCategory, NotificationPrefs, SessionUser, Subfolder } from '../lib/api';
+import type { Product } from '../lib/types';
 
-type Tab = 'users' | 'categories' | 'subfolders' | 'notifications';
+type Tab = 'users' | 'products' | 'categories' | 'subfolders' | 'notifications';
 
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>('users');
@@ -37,6 +41,7 @@ export function SettingsView() {
         sub="Workspace configuration"
         tabs={[
           { id: 'users', label: 'Users' },
+          { id: 'products', label: 'Products' },
           { id: 'categories', label: 'Business categories' },
           { id: 'subfolders', label: 'Sub-folders' },
           { id: 'notifications', label: 'Notifications' },
@@ -46,6 +51,7 @@ export function SettingsView() {
       />
 
       {tab === 'users' && (isAdmin ? <UsersTab /> : <NotAllowed />)}
+      {tab === 'products' && (isAdmin ? <ProductsTab /> : <NotAllowed />)}
       {tab === 'categories' && (isAdmin ? <CategoriesTab /> : <NotAllowed />)}
       {tab === 'subfolders' && (isAdmin ? <SubfoldersTab /> : <NotAllowed />)}
       {tab === 'notifications' && <NotificationsTab />}
@@ -65,6 +71,136 @@ function NotAllowed() {
     }}>
       This section is admin-only.
     </div>
+  );
+}
+
+function ProductsTab() {
+  const productsQ = useProducts();
+  const createProd = useCreateProduct();
+  const patchProd = usePatchProduct();
+  const deleteProd = useDeleteProduct();
+  const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+
+  const products = productsQ.data ?? [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>
+          {products.length} product{products.length === 1 ? '' : 's'} — columns in the backlog kanban and entries in the sidebar.
+        </div>
+        <button className="btn btn-primary" onClick={() => setShowNew(true)}>
+          <Icon name="plus" size={14} /> New product
+        </button>
+      </div>
+
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+        {products.map((p, i) => (
+          <div key={p.id} style={{
+            display: 'grid',
+            gridTemplateColumns: '28px 130px 1fr 80px 70px 32px 28px',
+            alignItems: 'center',
+            gap: 14,
+            padding: '12px 16px',
+            borderBottom: i < products.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+          }}>
+            <span style={{ width: 14, height: 14, borderRadius: 3, background: p.color, border: '1px solid var(--border-subtle)' }} />
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>{p.id}</span>
+            <span style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500 }}>{p.label}</span>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{p.count ?? 0} items</span>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{p.color}</span>
+            <button className="btn btn-subtle btn-icon" title="Edit" onClick={() => setEditing(p)}>
+              <Icon name="edit" size={13} />
+            </button>
+            <button
+              className="btn btn-subtle btn-icon"
+              title="Delete"
+              onClick={() => {
+                if ((p.count ?? 0) > 0) { alert(`Can't delete "${p.label}" while ${p.count} backlog items are attached.`); return; }
+                if (confirm(`Delete product "${p.label}"?`)) deleteProd.mutate(p.id);
+              }}
+              style={{ color: 'var(--danger-fg)' }}
+            >
+              <Icon name="close" size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {showNew && (
+        <ProductDialog
+          title="New product"
+          onClose={() => setShowNew(false)}
+          onSubmit={(body) => createProd.mutate(body, { onSuccess: () => setShowNew(false) })}
+        />
+      )}
+      {editing && (
+        <ProductDialog
+          title={`Edit ${editing.label}`}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSubmit={(body) => patchProd.mutate({ id: editing.id, patch: body }, { onSuccess: () => setEditing(null) })}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProductDialog({ title, initial, onClose, onSubmit }: {
+  title: string;
+  initial?: Product;
+  onClose: () => void;
+  onSubmit: (body: { id: string; label: string; color: string; accent?: string }) => void;
+}) {
+  const [id, setId] = useState(initial?.id ?? '');
+  const [label, setLabel] = useState(initial?.label ?? '');
+  const [color, setColor] = useState(initial?.color ?? '#297D2D');
+  const [accent, setAccent] = useState(initial?.accent ?? initial?.color ?? '#49BC4E');
+  const isEdit = !!initial;
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id.trim() || !label.trim() || !color.trim()) return;
+    onSubmit({ id: id.trim().toLowerCase(), label: label.trim(), color, accent });
+  };
+
+  return (
+    <Modal title={title} onClose={onClose}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Labelled label="ID">
+          <input
+            value={id}
+            onChange={(e) => setId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            disabled={isEdit}
+            placeholder="e.g. hr-platform"
+            className="input"
+            style={{ height: 32, width: '100%', opacity: isEdit ? 0.6 : 1 }}
+          />
+        </Labelled>
+        <Labelled label="Label">
+          <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} className="input" style={{ height: 32, width: '100%' }} />
+        </Labelled>
+        <Labelled label="Colour">
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} style={{ width: 44, height: 32, border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }} />
+            <input value={color} onChange={(e) => setColor(e.target.value)} className="input" style={{ height: 32, flex: 1 }} />
+          </div>
+        </Labelled>
+        <Labelled label="Accent">
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} style={{ width: 44, height: 32, border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }} />
+            <input value={accent} onChange={(e) => setAccent(e.target.value)} className="input" style={{ height: 32, flex: 1 }} />
+          </div>
+        </Labelled>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={!id.trim() || !label.trim() || !color.trim()}>
+            {isEdit ? 'Save' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

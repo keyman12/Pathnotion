@@ -49,6 +49,13 @@ export const api = {
     },
   },
   products: () => fetchJson<Product[]>('/products'),
+  productsCrud: {
+    create: (body: { id: string; label: string; color: string; accent?: string; sortOrder?: number }) =>
+      fetchJson<Product>('/products', { method: 'POST', body: JSON.stringify(body) }),
+    patch: (id: string, body: Partial<Pick<Product, 'label' | 'color' | 'accent'>> & { sortOrder?: number }) =>
+      fetchJson<Product>(`/products/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id: string) => fetchJson<void>(`/products/${id}`, { method: 'DELETE' }),
+  },
   backlog: {
     list: (q: Partial<{ product: string; stage: string; owner: string }> = {}) => {
       const params = new URLSearchParams(q as Record<string, string>).toString();

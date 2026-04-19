@@ -209,6 +209,47 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 }
 .input:focus { border-color: var(--path-primary); }
 
+/* Native form controls — inherit theme colours so dark mode doesn't show white dropdowns */
+input, textarea, select, button {
+  color: inherit;
+  font-family: inherit;
+}
+select.input, select:not([class]) {
+  background: var(--bg-surface);
+  color: var(--fg-1);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 0 28px 0 10px;
+  height: 34px;
+  font-size: 13px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='currentColor' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  cursor: pointer;
+}
+select option {
+  background: var(--bg-surface);
+  color: var(--fg-1);
+}
+/* Dark-mode time/date inputs — force the native widget to follow the theme */
+input[type="time"], input[type="date"], input[type="datetime-local"] {
+  color-scheme: light;
+}
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="datetime-local"] {
+  color-scheme: dark;
+}
+textarea.input {
+  height: auto;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 @keyframes slideIn {
   from { transform: translateX(20px); opacity: 0; }
   to { transform: none; opacity: 1; }

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
-import { useCreateTask, useDeleteTask, usePatchTask, useTasks } from '../lib/queries';
+import { useBacklog, useCreateTask, useDeleteTask, usePatchTask, useTasks } from '../lib/queries';
+import { PRODUCT_DOCS } from '../lib/seed';
 import { useSession } from '../lib/useSession';
 import type { FounderKey, Task } from '../lib/types';
 
@@ -12,14 +13,16 @@ const GROUPS = ['today', 'tomorrow', 'Fri', 'Mon', '15 Apr', 'later'];
 
 export function TasksView() {
   const [filter, setFilter] = useState<TaskFilter>('all');
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const session = useSession();
   const tasksQ = useTasks();
+  const backlogQ = useBacklog();
   const createTask = useCreateTask();
   const patchTask = usePatchTask();
   const deleteTask = useDeleteTask();
 
   const tasks = tasksQ.data ?? [];
+  const backlogItems = backlogQ.data ?? [];
   const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
 
   const shown = tasks.filter((t) => {
@@ -65,17 +68,23 @@ export function TasksView() {
             </div>
             <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
               {items.map((t, i) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  last={i === items.length - 1}
-                  editing={editingId === (t.id as number)}
-                  onEdit={() => setEditingId(t.id as number)}
-                  onDoneEdit={() => setEditingId(null)}
-                  onToggle={() => patchTask.mutate({ id: t.id as number, patch: { done: !t.done } as any })}
-                  onPatch={(patch) => patchTask.mutate({ id: t.id as number, patch })}
-                  onDelete={() => deleteTask.mutate(t.id as number)}
-                />
+                expandedId === (t.id as number)
+                  ? <TaskEditor
+                      key={t.id}
+                      task={t}
+                      last={i === items.length - 1}
+                      backlogItems={backlogItems}
+                      onCollapse={() => setExpandedId(null)}
+                      onPatch={(patch) => patchTask.mutate({ id: t.id as number, patch })}
+                      onDelete={() => { deleteTask.mutate(t.id as number); setExpandedId(null); }}
+                    />
+                  : <TaskRow
+                      key={t.id}
+                      task={t}
+                      last={i === items.length - 1}
+                      onClick={() => setExpandedId(t.id as number)}
+                      onToggle={() => patchTask.mutate({ id: t.id as number, patch: { done: !t.done } as any })}
+                    />
               ))}
             </div>
           </div>
@@ -90,76 +99,39 @@ export function TasksView() {
   );
 }
 
-function TaskRow({ task, last, editing, onEdit, onDoneEdit, onToggle, onPatch, onDelete }: {
+
+function TaskRow({ task, last, onClick, onToggle }: {
   task: Task;
   last: boolean;
-  editing: boolean;
-  onEdit: () => void;
-  onDoneEdit: () => void;
+  onClick: () => void;
   onToggle: () => void;
-  onPatch: (patch: Partial<Task>) => void;
-  onDelete: () => void;
 }) {
-  const [title, setTitle] = useState(task.title);
-  const [due, setDue] = useState(task.due);
-
-  const commit = () => {
-    if (title.trim() && (title !== task.title || due !== task.due)) {
-      onPatch({ title: title.trim(), due });
-    }
-    onDoneEdit();
-  };
-
   return (
-    <div className="row-hover" style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
+    <div className="row-hover" onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 12,
       padding: '12px 16px',
       borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+      cursor: 'pointer',
     }}>
       <button
-        onClick={onToggle}
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
         style={{
-          width: 18,
-          height: 18,
+          width: 18, height: 18,
           border: `1.5px solid ${task.done ? 'var(--path-primary)' : 'var(--border-strong)'}`,
           background: task.done ? 'var(--path-primary)' : 'transparent',
-          borderRadius: 4,
-          padding: 0,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
+          borderRadius: 4, padding: 0, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}>
         {task.done && <Icon name="check" size={12} color="var(--fg-on-primary)" />}
       </button>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {editing ? (
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onDoneEdit(); }}
-            className="input"
-            style={{ width: '100%', height: 30, padding: '0 8px', fontSize: 13.5 }}
-          />
-        ) : (
-          <div
-            onClick={onEdit}
-            style={{
-              fontSize: 13.5,
-              color: task.done ? 'var(--fg-4)' : 'var(--fg-1)',
-              fontWeight: 500,
-              textDecoration: task.done ? 'line-through' : 'none',
-              cursor: 'text',
-            }}>
-            {task.title}
-          </div>
-        )}
-        {task.link && !editing && (
+        <div style={{
+          fontSize: 13.5,
+          color: task.done ? 'var(--fg-4)' : 'var(--fg-1)',
+          fontWeight: 500,
+          textDecoration: task.done ? 'line-through' : 'none',
+        }}>{task.title}</div>
+        {task.link && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
             <Icon name="link" size={11} color="var(--fg-4)" />
             <span style={{ fontSize: 11.5, color: 'var(--fg-3)', fontFamily: 'var(--font-secondary)' }}>
@@ -170,40 +142,164 @@ function TaskRow({ task, last, editing, onEdit, onDoneEdit, onToggle, onPatch, o
           </div>
         )}
       </div>
-      {editing ? (
-        <input
-          value={due}
-          onChange={(e) => setDue(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
-          className="input"
-          style={{ width: 90, height: 28, padding: '0 8px', fontSize: 11 }}
-          placeholder="today, Fri, 15 Apr…"
-        />
-      ) : (
-        <span className="meta" style={{
-          fontSize: 10,
-          color: task.due === 'today' ? 'var(--danger-fg)' : 'var(--fg-4)',
-        }}>{task.due}</span>
-      )}
+      <span className="meta" style={{
+        fontSize: 10,
+        color: task.due === 'today' ? 'var(--danger-fg)' : 'var(--fg-4)',
+      }}>{task.due}</span>
       <Avatar who={task.owner} size={22} />
+    </div>
+  );
+}
+
+function TaskEditor({ task, last, backlogItems, onCollapse, onPatch, onDelete }: {
+  task: Task;
+  last: boolean;
+  backlogItems: Array<{ id: string; title: string }>;
+  onCollapse: () => void;
+  onPatch: (patch: Partial<Task>) => void;
+  onDelete: () => void;
+}) {
+  const [title, setTitle] = useState(task.title);
+  const [due, setDue] = useState(task.due);
+  const [linkType, setLinkType] = useState<'' | 'backlog' | 'doc'>(task.link?.type ?? '');
+  const [linkRef, setLinkRef] = useState<string>(task.link?.ref ?? '');
+
+  const commitLink = (type: '' | 'backlog' | 'doc', ref: string) => {
+    if (!type || !ref) {
+      if (task.link) onPatch({ link: null });
+      return;
+    }
+    if (task.link?.type !== type || task.link?.ref !== ref) {
+      onPatch({ link: { type, ref } } as Partial<Task>);
+    }
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      borderTop: '1px solid var(--border-subtle)',
+      borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+      borderLeft: '3px solid var(--path-primary-light-2)',
+    }}>
       <button
-        onClick={onDelete}
-        title="Delete task"
-        className="row-hover"
+        type="button"
+        onClick={onCollapse}
         style={{
-          border: 0,
-          background: 'transparent',
-          color: 'var(--fg-4)',
-          padding: 4,
-          borderRadius: 4,
-          cursor: 'pointer',
-          display: 'flex',
+          display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+          padding: '10px 16px', background: 'var(--bg-sunken)', border: 0,
+          borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', textAlign: 'left', color: 'inherit',
         }}
       >
-        <Icon name="close" size={12} />
+        <span
+          onClick={(e) => { e.stopPropagation(); onPatch({ done: !task.done } as Partial<Task>); }}
+          style={{
+            width: 18, height: 18,
+            border: `1.5px solid ${task.done ? 'var(--path-primary)' : 'var(--border-strong)'}`,
+            background: task.done ? 'var(--path-primary)' : 'transparent',
+            borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+          {task.done && <Icon name="check" size={12} color="var(--fg-on-primary)" />}
+        </span>
+        <span style={{ flex: 1, fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, textDecoration: task.done ? 'line-through' : 'none' }}>{task.title}</span>
+        <Avatar who={task.owner} size={20} />
+        <Icon name="chevron-up" size={14} color="var(--fg-3)" />
       </button>
+
+      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <TField label="Title">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => { if (title.trim() && title !== task.title) onPatch({ title: title.trim() }); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className="input"
+            style={{ width: '100%' }}
+          />
+        </TField>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <TField label="Due">
+            <input
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              onBlur={() => { if (due !== task.due) onPatch({ due }); }}
+              className="input"
+              placeholder="today, Fri, 15 Apr…"
+            />
+          </TField>
+          <TField label="Owner">
+            <select
+              value={task.owner}
+              onChange={(e) => onPatch({ owner: e.target.value as FounderKey })}
+              className="input"
+            >
+              <option value="D">Dave</option>
+              <option value="R">Raj</option>
+            </select>
+          </TField>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8, alignItems: 'end' }}>
+          <TField label="Attach">
+            <select
+              value={linkType}
+              onChange={(e) => {
+                const t = e.target.value as '' | 'backlog' | 'doc';
+                setLinkType(t);
+                if (!t) { setLinkRef(''); commitLink('', ''); }
+              }}
+              className="input"
+            >
+              <option value="">None</option>
+              <option value="backlog">Backlog item</option>
+              <option value="doc">Document</option>
+            </select>
+          </TField>
+          {linkType === 'backlog' ? (
+            <TField label="Backlog item">
+              <select
+                value={linkRef}
+                onChange={(e) => { setLinkRef(e.target.value); commitLink('backlog', e.target.value); }}
+                className="input"
+              >
+                <option value="">— pick one —</option>
+                {backlogItems.map((b) => <option key={b.id} value={b.id}>{b.id} — {b.title}</option>)}
+              </select>
+            </TField>
+          ) : linkType === 'doc' ? (
+            <TField label="Document">
+              <select
+                value={linkRef}
+                onChange={(e) => { setLinkRef(e.target.value); commitLink('doc', e.target.value); }}
+                className="input"
+              >
+                <option value="">— pick one —</option>
+                {PRODUCT_DOCS.map((d) => <option key={d.id} value={d.title}>{d.title}</option>)}
+              </select>
+            </TField>
+          ) : <div />}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+          <button
+            type="button"
+            className="btn btn-subtle"
+            style={{ color: 'var(--danger-fg)', padding: '6px 10px', fontSize: 12 }}
+            onClick={() => { if (confirm('Delete this task?')) onDelete(); }}
+          >
+            <Icon name="close" size={12} /> Delete
+          </button>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>Changes save automatically</span>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function TField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span className="meta" style={{ fontSize: 9.5 }}>{label}</span>
+      {children}
+    </label>
   );
 }
 
