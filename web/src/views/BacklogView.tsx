@@ -4,6 +4,7 @@ import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
 import type { BacklogItem, FounderKey, Stage } from '../lib/types';
 import { useBacklog, useCreateBacklog, useCreateSubfolder, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
+import { PRODUCT_DOCS } from '../lib/seed';
 import { useSession } from '../lib/useSession';
 import type { Subfolder } from '../lib/api';
 
@@ -557,13 +558,18 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           </FieldLabel>
         </div>
 
+        {/* Attach — link to a doc or paste a URL */}
+        <FieldLabel label="Attach">
+          <AttachPicker value={item.link ?? null} onChange={(link) => onPatch({ link })} />
+        </FieldLabel>
+
         <FieldLabel label="Sub-folder">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
               value={item.subfolderId ?? ''}
               onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
               className="input"
-              style={{ maxWidth: 280, flex: '0 0 280px' }}
+              style={{ flex: '1 1 200px', minWidth: 180, maxWidth: 360 }}
               disabled={productSubfolders.length === 0}
             >
               <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders yet'}</option>
@@ -572,7 +578,7 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
             <button
               type="button"
               className="btn btn-ghost"
-              style={{ padding: '6px 10px', fontSize: 12 }}
+              style={{ padding: '6px 10px', fontSize: 12, flexShrink: 0 }}
               onClick={async () => {
                 const name = prompt(`New sub-folder under "${p?.label ?? item.product}":`)?.trim();
                 if (!name) return;
@@ -629,6 +635,75 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
       <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+function AttachPicker({ value, onChange }: {
+  value: { type: 'doc' | 'backlog' | 'url'; ref: string } | null;
+  onChange: (v: { type: 'doc' | 'backlog' | 'url'; ref: string } | null) => void;
+}) {
+  const [type, setType] = useState<'' | 'doc' | 'backlog' | 'url'>(value?.type ?? '');
+  const [ref, setRef] = useState<string>(value?.ref ?? '');
+
+  const commit = (t: '' | 'doc' | 'backlog' | 'url', r: string) => {
+    if (!t || !r) { if (value) onChange(null); return; }
+    if (t === 'url') {
+      // URL: no commit until blur
+      onChange({ type: t, ref: r });
+    } else {
+      onChange({ type: t, ref: r });
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <select
+        value={type}
+        onChange={(e) => {
+          const t = e.target.value as '' | 'doc' | 'backlog' | 'url';
+          setType(t);
+          if (!t) { setRef(''); onChange(null); }
+        }}
+        className="input"
+        style={{ flex: '0 0 140px' }}
+      >
+        <option value="">— none —</option>
+        <option value="doc">Document</option>
+        <option value="url">Link / URL</option>
+      </select>
+      {type === 'doc' && (
+        <select
+          value={ref}
+          onChange={(e) => { setRef(e.target.value); commit('doc', e.target.value); }}
+          className="input"
+          style={{ flex: '1 1 200px', minWidth: 180 }}
+        >
+          <option value="">— pick one —</option>
+          {PRODUCT_DOCS.map((d) => <option key={d.id} value={d.title}>{d.title}</option>)}
+        </select>
+      )}
+      {type === 'url' && (
+        <input
+          type="url"
+          value={ref}
+          onChange={(e) => { const v = e.target.value; setRef(v); if (v.trim()) commit('url', v.trim()); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          placeholder="https://…"
+          className="input"
+          style={{ flex: '1 1 200px', minWidth: 200 }}
+        />
+      )}
+      {value && (
+        <button
+          type="button"
+          className="btn btn-ghost"
+          style={{ padding: '6px 10px', fontSize: 12 }}
+          onClick={() => { setType(''); setRef(''); onChange(null); }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
   );
 }
 

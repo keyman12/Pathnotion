@@ -45,6 +45,7 @@ export interface BacklogItem {
   sortOrder?: number;
   completedAt?: string | null;
   subfolderId?: number | null;
+  link?: { type: 'doc' | 'backlog' | 'url'; ref: string } | null;
   /** Write-only: setting true stamps completedAt = now; false clears it. */
   completed?: boolean;
 }

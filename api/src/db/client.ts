@@ -21,5 +21,7 @@ db.exec(schemaSql);
 
 // Migrations — additive. Each ALTER is wrapped so re-running is a no-op.
 try { db.exec('ALTER TABLE backlog_items ADD COLUMN effort_days REAL'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE backlog_items ADD COLUMN link_type TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE backlog_items ADD COLUMN link_ref TEXT'); } catch { /* already present */ }
 
 export type DB = typeof db;

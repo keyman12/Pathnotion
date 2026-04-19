@@ -17,12 +17,21 @@ const SELECT_BACKLOG = `
          due_date AS due,
          progress,
          effort_days AS effortDays,
+         link_type AS linkType,
+         link_ref AS linkRef,
          flag,
          age,
          sort_order AS sortOrder,
          completed_at AS completedAt
   FROM backlog_items
 `;
+
+type BacklogRowRaw = { linkType: string | null; linkRef: string | null; [k: string]: unknown };
+function mapBacklog(row: BacklogRowRaw | undefined) {
+  if (!row) return row;
+  const { linkType, linkRef, ...rest } = row;
+  return { ...rest, link: linkType && linkRef ? { type: linkType, ref: linkRef } : null };
+}
 
 backlogRouter.get('/items', (req, res) => {
   const clauses: string[] = [];
@@ -32,8 +41,8 @@ backlogRouter.get('/items', (req, res) => {
   if (typeof stage === 'string' && stageSchema.safeParse(stage).success) { clauses.push('stage = @stage'); params.stage = stage; }
   if (typeof owner === 'string') { clauses.push('owner_key = @owner'); params.owner = owner; }
   const where = clauses.length ? ' WHERE ' + clauses.join(' AND ') : '';
-  const rows = db.prepare(SELECT_BACKLOG + where + ' ORDER BY sort_order, id').all(params);
-  res.json(rows);
+  const rows = db.prepare(SELECT_BACKLOG + where + ' ORDER BY sort_order, id').all(params) as BacklogRowRaw[];
+  res.json(rows.map(mapBacklog));
 });
 
 const createSchema = z.object({
@@ -70,8 +79,8 @@ backlogRouter.post('/items', (req, res) => {
     effortDays: parsed.data.effortDays ?? null,
     sort_order: maxOrder + 1,
   });
-  const row = db.prepare(SELECT_BACKLOG + ' WHERE id = ?').get(parsed.data.id);
-  res.status(201).json(row);
+  const row = db.prepare(SELECT_BACKLOG + ' WHERE id = ?').get(parsed.data.id) as BacklogRowRaw;
+  res.status(201).json(mapBacklog(row));
 });
 
 const patchSchema = z.object({
@@ -85,6 +94,7 @@ const patchSchema = z.object({
   flag: z.enum(['overdue', 'due-soon']).nullish(),
   progress: z.number().int().min(0).max(100).optional(),
   effortDays: z.number().min(0).nullish(),
+  link: z.object({ type: z.enum(['doc', 'backlog', 'url']), ref: z.string().min(1) }).nullish(),
   sortOrder: z.number().int().optional(),
   completed: z.boolean().optional(),
 });
@@ -117,13 +127,19 @@ backlogRouter.patch('/items/:id', (req, res) => {
   if (parsed.data.completed !== undefined) {
     sets.push(parsed.data.completed ? "completed_at = datetime('now')" : 'completed_at = NULL');
   }
+  if ((parsed.data as any).link !== undefined) {
+    const link = (parsed.data as any).link as { type: string; ref: string } | null;
+    sets.push('link_type = @linkType', 'link_ref = @linkRef');
+    (params as any).linkType = link?.type ?? null;
+    (params as any).linkRef = link?.ref ?? null;
+  }
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   sets.push("updated_at = datetime('now')");
 
   const result = db.prepare(`UPDATE backlog_items SET ${sets.join(', ')} WHERE id = @id`).run(params);
   if (!result.changes) return res.status(404).json({ error: 'Not found' });
-  const row = db.prepare(SELECT_BACKLOG + ' WHERE id = ?').get(req.params.id);
-  res.json(row);
+  const row = db.prepare(SELECT_BACKLOG + ' WHERE id = ?').get(req.params.id) as BacklogRowRaw;
+  res.json(mapBacklog(row));
 });
 
 backlogRouter.delete('/items/:id', (req, res) => {
