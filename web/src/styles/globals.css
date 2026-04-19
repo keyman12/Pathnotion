@@ -173,13 +173,24 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   color: var(--fg-2);
   background: transparent;
 }
+.btn:active { transform: translateY(0.5px); }
 .btn-primary { background: var(--path-primary); color: var(--fg-on-primary); border-color: var(--path-primary); }
 .btn-primary:hover { background: var(--path-primary-light-1); border-color: var(--path-primary-light-1); }
 .btn-ghost { background: transparent; border-color: var(--border-default); color: var(--fg-2); }
-.btn-ghost:hover { background: var(--bg-hover); }
+.btn-ghost:hover { background: var(--bg-hover); color: var(--fg-1); border-color: var(--border-strong); }
 .btn-subtle { background: transparent; color: var(--fg-3); }
 .btn-subtle:hover { background: var(--bg-hover); color: var(--fg-2); }
 .btn-icon { padding: 8px; }
+.btn-icon:hover { background: var(--bg-hover); }
+
+/* Inline editor footer — swap long/short labels at narrow widths */
+.inline-editor-footer { container-type: inline-size; }
+.inline-editor-action .ie-short { display: none; }
+@container (max-width: 360px) {
+  .inline-editor-action .ie-long { display: none; }
+  .inline-editor-action .ie-short { display: inline; }
+  .inline-editor-status { display: none; }
+}
 
 .section-h {
   display: flex;
@@ -215,9 +226,10 @@ input, textarea, select, button {
   font-family: inherit;
 }
 /* Any <select> uses theme colours — match all of them, not just .input */
-select {
-  background-color: var(--bg-surface);
-  color: var(--fg-1);
+select,
+select.input {
+  background-color: var(--bg-surface) !important;
+  color: var(--fg-1) !important;
   border: 1px solid var(--border-default);
   border-radius: 6px;
   padding: 0 28px 0 10px;
@@ -234,11 +246,15 @@ select {
   cursor: pointer;
 }
 /* Per-option styling is only respected by some browsers (Chrome/Firefox on Windows/Linux;
-   macOS Safari/Chrome still paint the popup via the system picker). On macOS we set
-   color-scheme so the system picker follows the app theme. */
+   macOS Safari/Chrome still paint the popup via the system picker). color-scheme below
+   is what actually flips the popup on macOS. */
 select option {
   background-color: var(--bg-surface);
   color: var(--fg-1);
+}
+[data-theme="dark"] select option {
+  background-color: #1E1E1E;
+  color: #F3F3F3;
 }
 select:focus { outline: none; border-color: var(--path-primary); }
 /* Page-level color-scheme so native popups (select, date, time) match */

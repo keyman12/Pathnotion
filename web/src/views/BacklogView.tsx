@@ -393,10 +393,12 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
   const p = products.find((x) => x.id === item.product);
   const productSubfolders = subfolders.filter((sf) => sf.productId === item.product);
 
-  // Local mirrors for text inputs so typing doesn't fire a request on every keystroke — saved on blur.
+  // Local mirrors for text/number inputs so typing isn't interrupted by the patch round-trip — saved on blur.
   const [title, setTitle] = useState(item.title);
   const [note, setNote] = useState(item.note ?? '');
   const [dueIso, setDueIso] = useState<string>(toIsoDate(item.due));
+  const [progressDraft, setProgressDraft] = useState<string>(String(item.progress ?? 0));
+  const [effortDraft, setEffortDraft] = useState<string>(item.effortDays != null ? String(item.effortDays) : '');
 
   const flag = computeFlag(dueIso, !!item.completedAt);
   const isCompleted = !!item.completedAt;
@@ -461,8 +463,8 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           />
         </FieldLabel>
 
-        {/* Priority / Due / Progress / Effort — 4-column row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
+        {/* Priority / Due / Progress / Effort — 4-column row, collapses gracefully on narrow containers */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
           <FieldLabel label="Priority">
             <select
               value={item.stage}
@@ -495,11 +497,14 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               min={0}
               max={100}
               step={5}
-              value={item.progress ?? 0}
-              onChange={(e) => {
-                const v = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+              value={progressDraft}
+              onChange={(e) => setProgressDraft(e.target.value)}
+              onBlur={() => {
+                const v = Math.max(0, Math.min(100, parseInt(progressDraft, 10) || 0));
+                setProgressDraft(String(v));
                 if (v !== (item.progress ?? 0)) onPatch({ progress: v });
               }}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               className="input"
             />
           </FieldLabel>
@@ -510,19 +515,23 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               min={0}
               step={0.5}
               placeholder="—"
-              value={item.effortDays ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const v = raw === '' ? null : Math.max(0, parseFloat(raw));
-                if ((v ?? null) !== (item.effortDays ?? null)) onPatch({ effortDays: v });
+              value={effortDraft}
+              onChange={(e) => setEffortDraft(e.target.value)}
+              onBlur={() => {
+                const trimmed = effortDraft.trim();
+                const v = trimmed === '' ? null : Math.max(0, parseFloat(trimmed));
+                const normalised = v == null || Number.isNaN(v) ? null : v;
+                setEffortDraft(normalised == null ? '' : String(normalised));
+                if ((normalised ?? null) !== (item.effortDays ?? null)) onPatch({ effortDays: normalised });
               }}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               className="input"
             />
           </FieldLabel>
         </div>
 
-        {/* Owner / Product / Sub-folder — secondary row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14 }}>
+        {/* Owner / Product — secondary row. Sub-folder appears below only when the product has any. */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14 }}>
           <FieldLabel label="Owner">
             <select
               value={item.owner}
@@ -543,45 +552,42 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
               {products.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
             </select>
           </FieldLabel>
+        </div>
 
+        {productSubfolders.length > 0 && (
           <FieldLabel label="Sub-folder">
             <select
               value={item.subfolderId ?? ''}
               onChange={(e) => onPatch({ subfolderId: e.target.value ? parseInt(e.target.value, 10) : null })}
-              disabled={!productSubfolders.length}
               className="input"
+              style={{ maxWidth: 280 }}
             >
-              <option value="">{productSubfolders.length ? '— none —' : 'No sub-folders'}</option>
+              <option value="">— none —</option>
               {productSubfolders.map((sf) => <option key={sf.id} value={sf.id}>{sf.name}</option>)}
             </select>
           </FieldLabel>
-        </div>
+        )}
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', borderTop: '1px solid var(--border-subtle)', paddingTop: 14, marginTop: 4 }}>
+        <div className="inline-editor-footer" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--border-subtle)', paddingTop: 14, marginTop: 4 }}>
           <button
             type="button"
-            className="btn"
-            style={{
-              padding: '8px 14px',
-              fontSize: 13,
-              background: isCompleted ? 'var(--bg-sunken)' : 'var(--bg-hover)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--fg-1)',
-            }}
+            className="btn btn-ghost inline-editor-action"
             onClick={() => onPatch({ completed: !isCompleted })}
+            data-long={isCompleted ? 'Re-open' : 'Mark complete'}
+            data-short={isCompleted ? 'Reopen' : 'Complete'}
           >
-            {isCompleted ? 'Re-open' : 'Mark complete'}
+            <span className="ie-long">{isCompleted ? 'Re-open' : 'Mark complete'}</span>
+            <span className="ie-short">{isCompleted ? 'Reopen' : 'Complete'}</span>
           </button>
           <button
             type="button"
-            className="btn"
-            style={{ padding: '8px 14px', fontSize: 13, background: 'var(--bg-hover)', border: '1px solid var(--border-default)', color: 'var(--fg-1)' }}
+            className="btn btn-ghost"
             onClick={() => { if (confirm(`Delete ${item.id}?`)) onDelete(); }}
           >
             Delete
           </button>
           <div style={{ flex: 1 }} />
-          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.id} · changes save automatically</span>
+          <span className="mono inline-editor-status" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.id} · changes save automatically</span>
         </div>
       </div>
     </div>
