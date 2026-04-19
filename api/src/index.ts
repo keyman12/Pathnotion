@@ -11,6 +11,10 @@ import { calendarRouter } from './routes/calendar.js';
 import { docsRouter } from './routes/docs.js';
 import { agentRouter } from './routes/agent.js';
 import { productsRouter } from './routes/products.js';
+import { businessCategoriesRouter } from './routes/business-categories.js';
+import { subfoldersRouter } from './routes/subfolders.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { startDigestScheduler } from './services/daily-digest.js';
 
 const app = express();
 
@@ -46,6 +50,9 @@ app.use('/api/tasks', requireAuth, tasksRouter);
 app.use('/api/calendar', requireAuth, calendarRouter);
 app.use('/api/docs', requireAuth, docsRouter);
 app.use('/api/agent', requireAuth, agentRouter);
+app.use('/api/business-categories', requireAuth, businessCategoriesRouter);
+app.use('/api/subfolders', requireAuth, subfoldersRouter);
+app.use('/api/notifications', requireAuth, notificationsRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -55,4 +62,5 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   console.log(`PathNotion API listening on :${port}`);
+  startDigestScheduler();
 });

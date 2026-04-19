@@ -8,10 +8,12 @@ export type Route =
   | 'calendar'
   | 'jeff'
   | 'settings'
+  | 'reports'
   | 'finance-docs'
   | 'sales-docs'
   | 'legal-docs'
-  | `product:${string}`;
+  | `product:${string}`
+  | `business:${string}`;
 
 export interface Founder {
   key: FounderKey;

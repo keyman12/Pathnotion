@@ -84,4 +84,51 @@ export const api = {
     schedule: () => fetchJson<AgentJob[]>('/agent/schedule'),
     access: () => fetchJson<AccessGrant[]>('/agent/access'),
   },
+  businessCategories: {
+    list: () => fetchJson<BusinessCategory[]>('/business-categories'),
+    create: (body: { id: string; label: string; icon?: string; sortOrder?: number }) =>
+      fetchJson<BusinessCategory>('/business-categories', { method: 'POST', body: JSON.stringify(body) }),
+    patch: (id: string, body: Partial<Pick<BusinessCategory, 'label' | 'icon' | 'sortOrder'>>) =>
+      fetchJson<BusinessCategory>(`/business-categories/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id: string) => fetchJson<void>(`/business-categories/${id}`, { method: 'DELETE' }),
+  },
+  subfolders: {
+    list: (productId?: string) => {
+      const q = productId ? `?product=${encodeURIComponent(productId)}` : '';
+      return fetchJson<Subfolder[]>(`/subfolders${q}`);
+    },
+    create: (body: { productId: string; name: string; sortOrder?: number }) =>
+      fetchJson<Subfolder>('/subfolders', { method: 'POST', body: JSON.stringify(body) }),
+    patch: (id: number, body: Partial<Pick<Subfolder, 'name' | 'sortOrder'>>) =>
+      fetchJson<Subfolder>(`/subfolders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id: number) => fetchJson<void>(`/subfolders/${id}`, { method: 'DELETE' }),
+  },
+  notifications: {
+    prefs: () => fetchJson<NotificationPrefs>('/notifications/prefs'),
+    patchPrefs: (body: Partial<Pick<NotificationPrefs, 'enabled' | 'deliveryTime'>> & { sections?: Partial<NotificationPrefs['sections']> }) =>
+      fetchJson<NotificationPrefs>('/notifications/prefs', { method: 'PATCH', body: JSON.stringify(body) }),
+    sendTest: () => fetchJson<{ ok: true }>('/notifications/send-test', { method: 'POST' }),
+  },
 };
+
+export interface BusinessCategory {
+  id: string;
+  label: string;
+  icon: string;
+  sortOrder: number;
+}
+
+export interface Subfolder {
+  id: number;
+  productId: string;
+  name: string;
+  sortOrder: number;
+}
+
+export interface NotificationPrefs {
+  enabled: boolean;
+  deliveryTime: string;
+  sections: { meetings: boolean; overdue: boolean; tasks: boolean; upcoming: boolean };
+  lastSentDate: string | null;
+  updatedAt: string;
+}

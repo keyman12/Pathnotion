@@ -13,7 +13,23 @@ import { TasksView } from './views/TasksView';
 import { CalendarView } from './views/CalendarView';
 import { JeffView } from './views/JeffView';
 import { SettingsView } from './views/SettingsView';
+import { ReportsView } from './views/ReportsView';
 import { LoginScreen } from './views/LoginScreen';
+import { useBusinessCategories } from './lib/queries';
+
+function BusinessPlaceholder({ categoryId }: { categoryId: string }) {
+  const catsQ = useBusinessCategories();
+  const cat = catsQ.data?.find((c) => c.id === categoryId);
+  return (
+    <div className="screen-enter" style={{ maxWidth: 720 }}>
+      <h1 style={{ fontSize: 24, fontWeight: 600, marginTop: 0 }}>{cat?.label ?? categoryId}</h1>
+      <div style={{ fontSize: 13.5, color: 'var(--fg-3)', marginTop: 6 }}>
+        This business category is set up in Settings. Content surfaces (docs, files, reports) for new categories
+        will land in a follow-up — for now you can manage the category itself in Settings › Categories.
+      </div>
+    </div>
+  );
+}
 import './styles/shell.css';
 import './styles/modules.css';
 
@@ -56,6 +72,8 @@ export function App() {
   else if (route === 'calendar') content = <CalendarView />;
   else if (route === 'jeff') content = <JeffView />;
   else if (route === 'settings') content = <SettingsView />;
+  else if (route === 'reports') content = <ReportsView />;
+  else if (route.startsWith('business:')) content = <BusinessPlaceholder categoryId={route.slice('business:'.length)} />;
   else content = <WeekView now={now} />;
 
   return (

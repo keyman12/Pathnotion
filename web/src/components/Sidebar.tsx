@@ -5,6 +5,7 @@ import { Icon } from './Icon';
 import { Avatar } from './primitives';
 import type { Route } from '../lib/types';
 import { useSession } from '../lib/useSession';
+import { useBusinessCategories } from '../lib/queries';
 
 interface NavLink { route: Route; label: string; icon: IconName; badge?: string; }
 
@@ -14,14 +15,19 @@ const WORKSPACE: NavLink[] = [
   { route: 'docs', label: 'Documentation', icon: 'docs' },
   { route: 'tasks', label: 'Tasks', icon: 'tasks' },
   { route: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { route: 'reports', label: 'Reports', icon: 'trend-up' },
   { route: 'jeff', label: 'Jeff', icon: 'agent', badge: 'AGENT' },
 ];
 
-const BUSINESS: { id: string; label: string }[] = [
-  { id: 'finance', label: 'Finance' },
-  { id: 'sales', label: 'Sales' },
-  { id: 'legal', label: 'Legal' },
-];
+const BUILTIN_BUSINESS_ROUTE: Record<string, Route> = {
+  finance: 'finance-docs',
+  sales: 'sales-docs',
+  legal: 'legal-docs',
+};
+
+function businessRouteFor(id: string): Route {
+  return (BUILTIN_BUSINESS_ROUTE[id] ?? `business:${id}`) as Route;
+}
 
 export function Sidebar() {
   const route = useUI((s) => s.route);
@@ -30,6 +36,8 @@ export function Sidebar() {
   const theme = useUI((s) => s.theme);
   const session = useSession();
   const isAdmin = session.data?.role === 'admin';
+  const categoriesQ = useBusinessCategories();
+  const categories = categoriesQ.data ?? [];
 
   return (
     <aside className="sidebar">
@@ -92,26 +100,28 @@ export function Sidebar() {
           })}
         </div>
 
-        <div className="sidebar-section">
-          <div className="sidebar-section__head">
-            <span>Business</span>
+        {categories.length > 0 && (
+          <div className="sidebar-section">
+            <div className="sidebar-section__head">
+              <span>Business</span>
+            </div>
+            {categories.map((c) => {
+              const target = businessRouteFor(c.id);
+              const active = route === target;
+              const iconName = (c.icon as IconName) ?? 'money';
+              return (
+                <div
+                  key={c.id}
+                  className={`nav-row ${active ? 'is-active' : ''}`}
+                  onClick={() => navigate(target)}
+                >
+                  <Icon name={iconName} size={16} color={active ? 'var(--path-primary)' : 'var(--grey-500)'} />
+                  <span className="nav-row__label">{c.label}</span>
+                </div>
+              );
+            })}
           </div>
-          {BUSINESS.map((b) => {
-            const target: Route = (b.id === 'finance' ? 'finance-docs' : b.id === 'sales' ? 'sales-docs' : 'legal-docs');
-            const active = route === target;
-            const iconName: IconName = b.id === 'finance' ? 'money' : b.id === 'sales' ? 'trend-up' : 'scale';
-            return (
-              <div
-                key={b.id}
-                className={`nav-row ${active ? 'is-active' : ''}`}
-                onClick={() => navigate(target)}
-              >
-                <Icon name={iconName} size={16} color={active ? 'var(--path-primary)' : 'var(--grey-500)'} />
-                <span className="nav-row__label">{b.label}</span>
-              </div>
-            );
-          })}
-        </div>
+        )}
 
         {isAdmin && (
           <div className="sidebar-section" style={{ marginTop: 'auto' }}>

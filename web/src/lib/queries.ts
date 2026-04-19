@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import type { ApiError } from './api';
+import type { ApiError, BusinessCategory, NotificationPrefs, Subfolder } from './api';
 import type { BacklogItem, CalendarEvent, Task } from './types';
 
 // Every hook assumes the session is authed (App gates on it).
@@ -160,4 +160,71 @@ export function useResetUserPassword() {
   return useMutation({
     mutationFn: (args: { id: number; password: string }) => api.auth.users.resetPassword(args.id, args.password),
   });
+}
+
+// Business categories
+export function useBusinessCategories() {
+  return useQuery({ queryKey: ['business-categories'], queryFn: () => api.businessCategories.list(), staleTime: 5 * 60_000 });
+}
+export function useCreateBusinessCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.businessCategories.create>[0]) => api.businessCategories.create(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['business-categories'] }),
+  });
+}
+export function usePatchBusinessCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Parameters<typeof api.businessCategories.patch>[1] }) => api.businessCategories.patch(args.id, args.patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['business-categories'] }),
+  });
+}
+export function useDeleteBusinessCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.businessCategories.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['business-categories'] }),
+  });
+}
+
+// Subfolders
+export function useSubfolders(productId?: string) {
+  return useQuery({ queryKey: ['subfolders', productId ?? 'all'], queryFn: () => api.subfolders.list(productId) });
+}
+export function useCreateSubfolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.subfolders.create>[0]) => api.subfolders.create(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+  });
+}
+export function usePatchSubfolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: number; patch: Parameters<typeof api.subfolders.patch>[1] }) => api.subfolders.patch(args.id, args.patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+  });
+}
+export function useDeleteSubfolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.subfolders.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+  });
+}
+
+// Notification preferences
+export function useNotificationPrefs() {
+  return useQuery({ queryKey: ['notifications', 'prefs'], queryFn: () => api.notifications.prefs() });
+}
+export function usePatchNotificationPrefs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.notifications.patchPrefs>[0]) => api.notifications.patchPrefs(body),
+    onSuccess: (data) => qc.setQueryData(['notifications', 'prefs'], data),
+  });
+}
+export function useSendDigestTest() {
+  return useMutation({ mutationFn: () => api.notifications.sendTest() });
 }

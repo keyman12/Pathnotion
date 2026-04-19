@@ -73,6 +73,12 @@ const ACCESS = [
   { module: 'tasks',    read: 1, write: 1 },
 ];
 
+const BUSINESS_CATEGORIES = [
+  { id: 'finance', label: 'Finance', icon: 'money',    sort_order: 1 },
+  { id: 'sales',   label: 'Sales',   icon: 'trend-up', sort_order: 2 },
+  { id: 'legal',   label: 'Legal',   icon: 'scale',    sort_order: 3 },
+];
+
 const seedPassword = process.env.SEED_PASSWORD ?? 'pathnotion';
 
 const upsertUser = db.prepare(`
@@ -138,6 +144,15 @@ const upsertAccess = db.prepare(`
     can_write = excluded.can_write
 `);
 
+const upsertCategory = db.prepare(`
+  INSERT INTO business_categories (id, label, icon, sort_order)
+  VALUES (@id, @label, @icon, @sort_order)
+  ON CONFLICT(id) DO UPDATE SET
+    label = excluded.label,
+    icon = excluded.icon,
+    sort_order = excluded.sort_order
+`);
+
 const run = db.transaction(() => {
   const hash = bcrypt.hashSync(seedPassword, 10);
   for (const u of FOUNDERS) upsertUser.run({ ...u, hash });
@@ -166,6 +181,7 @@ const run = db.transaction(() => {
 
   for (const j of JOBS) upsertJob.run(j);
   for (const a of ACCESS) upsertAccess.run(a);
+  for (const c of BUSINESS_CATEGORIES) upsertCategory.run(c);
 });
 
 run();

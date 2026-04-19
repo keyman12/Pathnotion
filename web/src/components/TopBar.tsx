@@ -5,6 +5,7 @@ import { Button } from './primitives';
 import { Icon } from './Icon';
 import { PRODUCTS } from '../lib/seed';
 import { useLogout, useSession } from '../lib/useSession';
+import { useBusinessCategories } from '../lib/queries';
 
 const TITLE: Record<string, string> = {
   week: 'This Week',
@@ -14,16 +15,21 @@ const TITLE: Record<string, string> = {
   calendar: 'Calendar',
   jeff: 'Jeff',
   settings: 'Settings',
+  reports: 'Reports',
   'finance-docs': 'Finance',
   'sales-docs': 'Sales',
   'legal-docs': 'Legal',
 };
 
-export function titleFor(route: Route): string {
+export function titleFor(route: Route, categoryLabels?: Record<string, string>): string {
   if (route.startsWith('product:')) {
     const id = route.slice('product:'.length);
     const p = PRODUCTS.find((x) => x.id === id);
     return p ? p.label : 'Product';
+  }
+  if (route.startsWith('business:')) {
+    const id = route.slice('business:'.length);
+    return categoryLabels?.[id] ?? id;
   }
   return TITLE[route] ?? route;
 }
@@ -35,6 +41,8 @@ export function TopBar({ now }: { now: Date }) {
   const setTheme = useUI((s) => s.setTheme);
   const session = useSession();
   const logout = useLogout();
+  const categoriesQ = useBusinessCategories();
+  const categoryLabels = Object.fromEntries((categoriesQ.data ?? []).map((c) => [c.id, c.label]));
   const [menuOpen, setMenuOpen] = useState(false);
 
   const d = now.toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', timeZone: 'Europe/London' }).toUpperCase();
@@ -47,7 +55,7 @@ export function TopBar({ now }: { now: Date }) {
       <div className="breadcrumb">
         <span className="breadcrumb__root">Workspace</span>
         <Icon name="chevron-right" size={14} color="var(--grey-300)" />
-        <span className="breadcrumb__leaf">{titleFor(route)}</span>
+        <span className="breadcrumb__leaf">{titleFor(route, categoryLabels)}</span>
       </div>
       <div className="topbar__right">
         <span className="topbar__clock mono">{d.replace(',', '')} · {t}</span>

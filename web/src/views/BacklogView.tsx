@@ -357,6 +357,7 @@ function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete 
   const [productId, setProductId] = useState(item.product);
   const [stage, setStage] = useState<Stage>(item.stage);
   const [owner, setOwner] = useState<BacklogItem['owner']>(item.owner);
+  const [progress, setProgress] = useState<number>(item.progress ?? 0);
 
   const commit = () => {
     const patch: Partial<BacklogItem> = {};
@@ -366,6 +367,7 @@ function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete 
     if (productId !== item.product) patch.product = productId;
     if (stage !== item.stage) patch.stage = stage;
     if (owner !== item.owner) patch.owner = owner;
+    if (progress !== (item.progress ?? 0)) patch.progress = progress;
     if (Object.keys(patch).length) onPatch(patch);
     setEditing(false);
   };
@@ -447,6 +449,30 @@ function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete 
                 </span>
               )}
             </div>
+            <div className="meta" style={{ fontSize: 10 }}>Progress</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {editing ? (
+                <>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={progress}
+                    onChange={(e) => setProgress(parseInt(e.target.value, 10))}
+                    style={{ flex: 1 }}
+                  />
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{progress}%</span>
+                </>
+              ) : (
+                <>
+                  <div style={{ flex: 1, height: 6, background: 'var(--bg-sunken)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${item.progress ?? 0}%`, background: 'var(--path-primary)' }} />
+                  </div>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', minWidth: 40, textAlign: 'right' }}>{item.progress ?? 0}%</span>
+                </>
+              )}
+            </div>
           </div>
           <hr className="hr" style={{ margin: '24px 0' }} />
           <div className="meta" style={{ fontSize: 10, marginBottom: 8 }}>Notes</div>
@@ -479,7 +505,7 @@ function ItemDrawer({ item, products, onClose, onOpenProduct, onPatch, onDelete 
           {editing ? (
             <>
               <button className="btn btn-primary" onClick={commit}><Icon name="check" size={12} /> Save</button>
-              <button className="btn btn-ghost" onClick={() => { setTitle(item.title); setNote(item.note ?? ''); setDue(item.due ?? ''); setProductId(item.product); setStage(item.stage); setOwner(item.owner); setEditing(false); }}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setTitle(item.title); setNote(item.note ?? ''); setDue(item.due ?? ''); setProductId(item.product); setStage(item.stage); setOwner(item.owner); setProgress(item.progress ?? 0); setEditing(false); }}>Cancel</button>
             </>
           ) : (
             <>

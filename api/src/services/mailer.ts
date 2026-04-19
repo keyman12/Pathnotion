@@ -1,0 +1,52 @@
+import nodemailer, { type Transporter } from 'nodemailer';
+
+let cached: Transporter | null = null;
+
+export function getMailer(): Transporter | null {
+  if (cached) return cached;
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT ?? 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD;
+  if (!host || !user || !pass) return null;
+  cached = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+  });
+  return cached;
+}
+
+export function fromAddress(): string {
+  const name = process.env.SMTP_FROM_NAME ?? 'PathNotion';
+  const email = process.env.SMTP_FROM_EMAIL ?? process.env.SMTP_USER ?? 'noreply@example.com';
+  return `"${name}" <${email}>`;
+}
+
+export interface SendParams {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+export async function sendMail(params: SendParams): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const t = getMailer();
+  if (!t) return { ok: false, reason: 'SMTP not configured' };
+  const authUser = process.env.SMTP_USER!;
+  try {
+    await t.sendMail({
+      from: fromAddress(),
+      // Envelope-from must match the authenticated user for most SMTP servers (incl. Fasthosts)
+      envelope: { from: authUser, to: [params.to] },
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+      html: params.html,
+    });
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, reason: err?.response || err?.message || 'Send failed' };
+  }
+}

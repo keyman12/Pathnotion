@@ -184,3 +184,22 @@ CREATE TABLE IF NOT EXISTS sessions (
   expire  INTEGER NOT NULL                         -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire);
+
+-- Business categories (Finance / Sales / Legal / HR / Operations …)
+CREATE TABLE IF NOT EXISTS business_categories (
+  id          TEXT PRIMARY KEY,
+  label       TEXT NOT NULL,
+  icon        TEXT NOT NULL DEFAULT 'money',
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-user notification preferences (daily digest)
+CREATE TABLE IF NOT EXISTS notification_prefs (
+  user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  delivery_time   TEXT NOT NULL DEFAULT '07:00',   -- HH:MM local
+  sections        TEXT NOT NULL DEFAULT '{"meetings":true,"overdue":true,"tasks":true,"upcoming":true}',
+  last_sent_date  TEXT,                            -- YYYY-MM-DD of last delivery (dedupe)
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
