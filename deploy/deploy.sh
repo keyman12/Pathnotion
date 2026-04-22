@@ -42,13 +42,13 @@ echo "→ build web"
 npm --workspace web run build
 
 # ── Restart the service ──────────────────────────────────────────────────────
-# systemd first, pm2 second. If the service user doesn't have sudo, we skip the
-# restart and print the command for a human — building + pulling is still done.
+# Try systemd (Pi pattern) first, then PM2 (EC2 pattern). Try a passwordless sudo
+# restart — if sudoers.d/path-pathnotion grants it, this just works. If not, fall
+# through and print the command for a human.
 restart_note=""
-if command -v systemctl >/dev/null 2>&1 && sudo -n true 2>/dev/null && systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME.service"; then
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME.service" && sudo -n systemctl restart "$SERVICE_NAME" 2>/dev/null; then
   echo "→ systemctl restart $SERVICE_NAME"
-  sudo systemctl restart "$SERVICE_NAME"
-  sudo systemctl status "$SERVICE_NAME" --no-pager | head -8
+  sudo -n systemctl status "$SERVICE_NAME" --no-pager 2>/dev/null | head -8 || true
 elif command -v pm2 >/dev/null 2>&1 && pm2 describe "$SERVICE_NAME" >/dev/null 2>&1; then
   echo "→ pm2 restart $SERVICE_NAME"
   pm2 restart "$SERVICE_NAME"
