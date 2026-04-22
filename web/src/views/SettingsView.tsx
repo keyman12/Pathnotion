@@ -469,7 +469,10 @@ function CalendarTab() {
   const test = useTestGoogleCalendar();
   const [testResult, setTestResult] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 
-  // When the OAuth popup completes, it posts a message to re-fetch status.
+  // The OAuth popup sends a postMessage when it can, but Chrome strips the window.opener link
+  // after the cross-origin hop to accounts.google.com, so we can't rely on it. Belt-and-braces:
+  // react to postMessage if we get it, and also poll for the popup's closed state so the status
+  // refetch still happens the moment the user finishes (or dismisses) the consent flow.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type === 'pn:calendar-connected') {
@@ -486,7 +489,17 @@ function CalendarTab() {
     try {
       const { url } = await connect.mutateAsync();
       // Open the Google consent in a popup; callback tab closes itself.
-      window.open(url, 'pn-google-connect', 'width=540,height=720');
+      const popup = window.open(url, 'pn-google-connect', 'width=540,height=720');
+      // Poll for the popup closing. Fires after consent completes (popup self-closes) or after
+      // the user dismisses the popup. Either way we refetch so the main window reflects reality.
+      if (popup) {
+        const interval = window.setInterval(() => {
+          if (popup.closed) {
+            window.clearInterval(interval);
+            statusQ.refetch();
+          }
+        }, 500);
+      }
     } catch (err) {
       setTestResult({ kind: 'err', msg: (err as Error).message });
     }
