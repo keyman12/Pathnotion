@@ -79,6 +79,8 @@ export interface JeffMemory {
   sourceId: string | null;
   title: string;
   summary: string;
+  /** Full article body for the producing job kinds. Null for ingestion rows. */
+  body: string | null;
   tags: string[];
   scope: string | null;
   sourceUpdatedAt: string | null;
@@ -93,6 +95,7 @@ function rowToMemory(r: any): JeffMemory {
     sourceId: r.source_id ?? null,
     title: r.title,
     summary: r.summary,
+    body: r.body ?? null,
     tags: r.tags ? JSON.parse(r.tags) : [],
     scope: r.scope ?? null,
     sourceUpdatedAt: r.source_updated_at ?? null,
@@ -123,6 +126,7 @@ export function writeMemory(m: {
   sourceId?: string | null;
   title: string;
   summary: string;
+  body?: string | null;
   tags?: string[];
   scope?: string | null;
   sourceUpdatedAt?: string | null;
@@ -133,13 +137,14 @@ export function writeMemory(m: {
     if (existing) {
       db.prepare(`
         UPDATE jeff_memories
-        SET title = @title, summary = @summary, tags = @tags, scope = @scope,
+        SET title = @title, summary = @summary, body = @body, tags = @tags, scope = @scope,
             source_updated_at = @sourceUpdatedAt, updated_at = @now
         WHERE id = @id
       `).run({
         id: existing.id,
         title: m.title,
         summary: m.summary,
+        body: m.body ?? null,
         tags: JSON.stringify(m.tags ?? []),
         scope: m.scope ?? null,
         sourceUpdatedAt: m.sourceUpdatedAt ?? null,
@@ -150,14 +155,15 @@ export function writeMemory(m: {
   }
   const id = `mem_${randomUUID().slice(0, 12)}`;
   db.prepare(`
-    INSERT INTO jeff_memories (id, kind, source_id, title, summary, tags, scope, source_updated_at, created_at, updated_at)
-    VALUES (@id, @kind, @sourceId, @title, @summary, @tags, @scope, @sourceUpdatedAt, @now, @now)
+    INSERT INTO jeff_memories (id, kind, source_id, title, summary, body, tags, scope, source_updated_at, created_at, updated_at)
+    VALUES (@id, @kind, @sourceId, @title, @summary, @body, @tags, @scope, @sourceUpdatedAt, @now, @now)
   `).run({
     id,
     kind: m.kind,
     sourceId: m.sourceId ?? null,
     title: m.title,
     summary: m.summary,
+    body: m.body ?? null,
     tags: JSON.stringify(m.tags ?? []),
     scope: m.scope ?? null,
     sourceUpdatedAt: m.sourceUpdatedAt ?? null,
@@ -557,7 +563,8 @@ export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Pr
     system: getJobPrompt(opts.jobId ?? null, 'weekly-summary'),
     messages: [{ role: 'user', content: userMessage }],
   });
-  const text = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
+  const rawText = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
+  const body = stripJeffMonologue(rawText);
 
   const today = new Date().toISOString().slice(0, 10);
   const title = `Weekly summary — ${today}`;
@@ -565,14 +572,15 @@ export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Pr
     kind: 'weekly-summary',
     sourceId: `weekly:${today}`,
     title,
-    summary: text.slice(0, 600),
+    summary: buildTeaser(body),
+    body,
     tags: ['weekly', 'summary'],
   });
 
   // Drop a markdown file into Jeff's desk under Digests/ with the standard header.
   let driveFileId: string | null = null;
   try {
-    const doc = buildMarkdownHeader({ title }) + text.trim() + '\n';
+    const doc = buildMarkdownHeader({ title }) + body + '\n';
     const saved = await saveToJeffDesk({
       kind: 'digest',
       filename: `${title}.md`,
@@ -584,7 +592,7 @@ export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Pr
     console.warn('[jeff] Could not save weekly summary to Drive:', (err as Error).message);
   }
 
-  return { text, memoryId: mem.id, driveFileId };
+  return { text: body, memoryId: mem.id, driveFileId };
 }
 
 /** Look up any user's Google tokens — we only need one to upload to the shared drive.
@@ -655,6 +663,47 @@ function buildMarkdownHeader(opts: { title: string; scope?: string }): string {
   return `# ${opts.title}\n_Jeff, ${dateLabel} ${timeLabel}${scopeLine}_\n\n`;
 }
 
+/** Strip Jeff's internal monologue from the start of a generated article so the saved body
+ *  reads as a clean digest, not stream-of-thought. Removes opening lines that look like
+ *  thinking ("Looking at the search results…", "Let me compile…", "I'll now…") until we
+ *  reach the first heading, list item, or substantive paragraph. */
+const MONOLOGUE_OPENERS = [
+  /^looking at /i, /^based on /i, /^let me /i, /^i'?ll /i, /^i'?m going to /i,
+  /^i have /i, /^i've /i, /^now /i, /^okay[,.\s]/i, /^alright[,.\s]/i,
+  /^great[,.\s]/i, /^perfect[,.\s]/i, /^here'?s /i, /^here is /i,
+  /^to (?:answer|address|tackle|build|compile) /i,
+];
+function stripJeffMonologue(text: string): string {
+  if (!text) return '';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  let cut = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) { cut = i + 1; continue; }
+    // Stop the moment we hit something that looks like real content.
+    if (line.startsWith('#')) break;            // markdown heading
+    if (/^[-*+]\s/.test(line)) break;           // bullet
+    if (/^\d+[.)]\s/.test(line)) break;         // numbered list
+    if (/^>/.test(line)) break;                 // blockquote
+    // Otherwise, only skip if the line clearly matches a monologue opener.
+    if (MONOLOGUE_OPENERS.some((re) => re.test(line))) { cut = i + 1; continue; }
+    break; // first substantive paragraph — keep from here
+  }
+  const out = lines.slice(cut).join('\n').trim();
+  return out || text.trim();
+}
+
+/** Short summary used in the system prompt and on Today cards. Pull the first heading or
+ *  paragraph and trim — never just the first 600 chars, which often slices mid-sentence. */
+function buildTeaser(body: string, max = 500): string {
+  const cleaned = body.replace(/^#+\s.*$/gm, '').replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= max) return cleaned;
+  // Cut at the last sentence boundary inside the limit if we can find one.
+  const slice = cleaned.slice(0, max);
+  const lastStop = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
+  return (lastStop > max * 0.6 ? slice.slice(0, lastStop + 1) : slice).trim() + '…';
+}
+
 // ─── Daily news scan ────────────────────────────────────────────────────────
 
 async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ memoryId: string; driveFileId: string | null; competitors: number }> {
@@ -669,13 +718,15 @@ async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ mem
     .replaceAll('{competitors}', names)
     .replaceAll('{today}', today);
   const result = await askJeff({ message });
+  const body = stripJeffMonologue(result.text);
 
   const title = `Daily news — ${today}`;
   const mem = writeMemory({
     kind: 'daily-news',
     sourceId: `daily-news:${today}`,
     title,
-    summary: result.text.slice(0, 600),
+    summary: buildTeaser(body),
+    body,
     tags: ['daily-news'],
   });
 
@@ -683,7 +734,7 @@ async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ mem
   let driveFileId: string | null = null;
   try {
     const scope = competitors.length ? `covered: ${names}` : undefined;
-    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    const doc = buildMarkdownHeader({ title, scope }) + body + '\n';
     const saved = await saveToJeffDesk({
       kind: 'digest',
       filename: `${title}.md`,
@@ -711,6 +762,7 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
   const message = `${instruction}\n\nCompetitors:\n${list}`;
   const result = await askJeff({ message, maxSteps: 10 });
   const afterCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
+  const body = stripJeffMonologue(result.text);
 
   // Save the narrative as a memory so the weekly summary can reference it.
   const today = new Date().toISOString().slice(0, 10);
@@ -719,7 +771,8 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
     kind: 'competitor-features',
     sourceId: `competitor-features:${today}`,
     title,
-    summary: result.text.slice(0, 600),
+    summary: buildTeaser(body),
+    body,
     tags: ['competitors', 'features'],
   });
 
@@ -727,7 +780,7 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
   let driveFileId: string | null = null;
   try {
     const scope = `covered: ${competitors.map((c) => c.name).join(', ')}`;
-    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    const doc = buildMarkdownHeader({ title, scope }) + body + '\n';
     const saved = await saveToJeffDesk({
       kind: 'watch',
       filename: `${title}.md`,
@@ -763,6 +816,7 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
   const message = `${instruction}\n\nCompetitors (all have press pages):\n${list}`;
 
   const result = await askJeff({ message, maxSteps: rows.length * 2 + 4 });
+  const body = stripJeffMonologue(result.text);
 
   // Save the narrative as a memory so the Week view / chat can reference today's refresh at a glance.
   const title = `Research refresh — ${today}`;
@@ -770,7 +824,8 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
     kind: 'research-refresh',
     sourceId: `research-refresh:${today}`,
     title,
-    summary: result.text.slice(0, 600),
+    summary: buildTeaser(body),
+    body,
     tags: ['research', 'competitors'],
   });
 
@@ -778,7 +833,7 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
   // later item — for now this gives owners a readable briefing they can open directly.
   try {
     const scope = `covered: ${rows.map((r) => r.name).join(', ')}`;
-    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    const doc = buildMarkdownHeader({ title, scope }) + body + '\n';
     await saveToJeffDesk({
       kind: 'research',
       filename: `${title}.md`,

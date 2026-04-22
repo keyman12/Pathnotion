@@ -827,6 +827,7 @@ function MiddlePane({ mode, driveName, driveId, parentId, virtualView, isAtRoot,
             selectedArticleId={selectedArticleId}
             onOpenFile={onOpenFile}
             onOpenArticle={onOpenArticle}
+            onTrashFile={onTrash}
           />
         )}
       </div>
@@ -1009,13 +1010,14 @@ function ArticleTable({ tag, articles, selectedArticleId, onOpenArticle }: {
 
 // ─── Merged list used inside a folder (files + articles together) ──────────
 
-function MergedList({ files, articles, selectedFileId, selectedArticleId, onOpenFile, onOpenArticle }: {
+function MergedList({ files, articles, selectedFileId, selectedArticleId, onOpenFile, onOpenArticle, onTrashFile }: {
   files: DriveEntry[];
   articles: DocSummary[];
   selectedFileId: string | null;
   selectedArticleId: string | null;
   onOpenFile: (id: string) => void;
   onOpenArticle: (id: string) => void;
+  onTrashFile: (file: DriveEntry) => void;
 }) {
   const resolve = useTagResolver();
   return (
@@ -1037,6 +1039,7 @@ function MergedList({ files, articles, selectedFileId, selectedArticleId, onOpen
           file={f}
           selected={selectedFileId === f.id}
           onOpen={() => onOpenFile(f.id)}
+          onTrash={() => onTrashFile(f)}
         />
       ))}
     </div>
@@ -1206,7 +1209,7 @@ function ArticleMenuItem({ icon, label, onClick, danger }: {
   );
 }
 
-function FileRow({ file, selected, onOpen }: { file: DriveEntry; selected: boolean; onOpen: () => void }) {
+function FileRow({ file, selected, onOpen, onTrash }: { file: DriveEntry; selected: boolean; onOpen: () => void; onTrash: () => void }) {
   const kind = kindOf(file);
   return (
     <div
@@ -1233,7 +1236,27 @@ function FileRow({ file, selected, onOpen }: { file: DriveEntry; selected: boole
       <span />
       <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{file.size != null ? humanBytes(file.size) : ''}</span>
       <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>{file.modifiedTime ? `Edited ${relativeTime(file.modifiedTime)}` : ''}</span>
-      <Avatar who={ownerKey(file)} size={20} />
+      {/* Last column — avatar by default, trash button revealed on row hover. Saves a trip
+          to the top toolbar for the most common destructive action on a long file list. */}
+      <div style={{ position: 'relative', width: 32, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={(e) => e.stopPropagation()}>
+        <Avatar who={ownerKey(file)} size={20} />
+        <button
+          className="row-actions-btn"
+          title="Move to trash"
+          aria-label={`Delete ${file.name}`}
+          onClick={(e) => { e.stopPropagation(); onTrash(); }}
+          style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 24,
+            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+            borderRadius: 4, cursor: 'pointer',
+            color: 'var(--danger-fg)',
+          }}
+        >
+          <Icon name="trash" size={13} />
+        </button>
+      </div>
     </div>
   );
 }

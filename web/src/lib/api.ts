@@ -324,12 +324,15 @@ export interface JeffStatus {
   memories: { total: number; byKind: Record<string, number> };
 }
 
+export type JeffMemoryKind = 'article' | 'drive-file' | 'weekly-summary' | 'daily-news' | 'competitor-features' | 'research-refresh' | 'note';
+
 export interface JeffMemory {
   id: string;
-  kind: 'article' | 'drive-file' | 'weekly-summary' | 'daily-news' | 'competitor-features' | 'research-refresh' | 'note';
+  kind: JeffMemoryKind;
   sourceId: string | null;
   title: string;
   summary: string;
+  body: string | null;
   tags: string[];
   scope: string | null;
   sourceUpdatedAt: string | null;
@@ -339,19 +342,17 @@ export interface JeffMemory {
 
 export interface JeffTodayFeedItem {
   id: string;
-  kind: string;
+  kind: JeffMemoryKind;
   title: string;
   summary: string;
+  body: string | null;
   tags: string[];
   createdAt: string;
   updatedAt: string;
 }
 
 export interface JeffTodayFeed {
-  dailyNews:          JeffTodayFeedItem | null;
-  weeklySummary:      JeffTodayFeedItem | null;
-  competitorFeatures: JeffTodayFeedItem | null;
-  researchRefresh:    JeffTodayFeedItem | null;
+  runs: JeffTodayFeedItem[];
 }
 
 export interface JeffMemoriesResponse {

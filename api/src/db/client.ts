@@ -114,6 +114,10 @@ db.exec(`
 `);
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_jeff_memories_kind ON jeff_memories(kind)'); } catch { /* already present */ }
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_jeff_memories_source ON jeff_memories(source_id)'); } catch { /* already present */ }
+// Full unmangled article body for kinds that produce one (daily-news, weekly-summary,
+// competitor-features, research-refresh). `summary` stays the short teaser used in prompts
+// and Today cards; `body` is the article rendered in the modal / saved to Drive.
+try { db.exec('ALTER TABLE jeff_memories ADD COLUMN body TEXT'); } catch { /* already present */ }
 
 // Extra columns on agent_jobs for the real scheduler.
 try { db.exec('ALTER TABLE agent_jobs ADD COLUMN kind TEXT'); } catch { /* already present */ }

@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import { Avatar, BacklogRow, HeadlineCard } from '../components/primitives';
 import { Icon } from '../components/Icon';
+import { JeffArticleModal } from '../components/JeffArticleModal';
 import { PRODUCT_DOCS } from '../lib/seed';
 import { useUI } from '../lib/store';
 import { useSession } from '../lib/useSession';
-import { useBacklog, useCalendar, useJeffMemories, useJeffTodayFeed, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
+import { useBacklog, useCalendar, useJeffTodayFeed, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
 import type { JeffTodayFeedItem } from '../lib/api';
 import type { CalendarEvent, Doc, FounderKey } from '../lib/types';
+
+const KIND_LABEL: Record<string, string> = {
+  'daily-news':           "Today's news",
+  'weekly-summary':       'Weekly summary',
+  'competitor-features':  'Competitor watch',
+  'research-refresh':     'Research refresh',
+};
 
 export function WeekView({ now }: { now: Date }) {
   const navigate = useUI((s) => s.navigate);
@@ -204,21 +213,20 @@ function DocRow({ doc, products }: { doc: Doc; products: Array<{ id: string; lab
 
 function JeffSummary() {
   const navigate = useUI((s) => s.navigate);
-  const memQ = useJeffMemories('weekly-summary', 1);
   const feedQ = useJeffTodayFeed();
   const runNow = useRunAgentJob();
-  const latest = memQ.data?.memories?.[0] ?? null;
+  const [openItem, setOpenItem] = useState<JeffTodayFeedItem | null>(null);
+
+  const runs = feedQ.data?.runs ?? [];
 
   const onGenerate = async () => {
     try { await runNow.mutateAsync('weekly-summary'); }
     catch (err) { alert(`Jeff couldn't draft the summary: ${(err as Error).message}`); }
   };
 
-  const feed = feedQ.data ?? null;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Weekly summary — existing card, unchanged visually. */}
+  // Empty state — nothing has run today (and no recent weekly summary either).
+  if (!runs.length) {
+    return (
       <div style={{
         border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
         padding: '18px 20px',
@@ -227,53 +235,58 @@ function JeffSummary() {
           <Avatar who="A" size={30} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, marginBottom: 4 }}>
-              {latest ? latest.title : 'No weekly summary yet.'}
+              Nothing from Jeff yet today.
             </div>
-            <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-              {latest
-                ? latest.summary
-                : "Jeff runs this every Monday at 07:00 — or click 'Draft now' to have him produce one right away."}
+            <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55 }}>
+              Scheduled jobs will appear here as Jeff runs them. Click "Draft now" to produce a weekly summary right away.
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onGenerate} disabled={runNow.isPending}>
-                <Icon name="sparkle" size={12} /> {runNow.isPending ? 'Drafting…' : latest ? 'Redraft now' : 'Draft now'}
+                <Icon name="sparkle" size={12} /> {runNow.isPending ? 'Drafting…' : 'Draft now'}
               </button>
               <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => navigate('jeff')}>
                 Open Jeff
               </button>
             </div>
           </div>
-          {latest && <span className="meta" style={{ fontSize: 10, flexShrink: 0 }}>{formatWeeklyAgo(latest.updatedAt)}</span>}
         </div>
       </div>
+    );
+  }
 
-      {/* Compact secondary cards — render only when Jeff has actually produced something. */}
-      {feed?.dailyNews && <JeffFeedCard label="Today's news" item={feed.dailyNews} navigateToJeff={() => navigate('jeff')} />}
-      {feed?.competitorFeatures && <JeffFeedCard label="Competitor watch" item={feed.competitorFeatures} navigateToJeff={() => navigate('jeff')} />}
-    </div>
+  return (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {runs.map((item) => (
+          <JeffFeedCard key={item.id} item={item} onOpen={() => setOpenItem(item)} />
+        ))}
+      </div>
+      {openItem && <JeffArticleModal article={openItem} onClose={() => setOpenItem(null)} />}
+    </>
   );
 }
 
-/** Compact one-liner card used for daily news / competitor watch under the weekly summary.
- *  Same visual language as the weekly card but smaller and without action buttons. */
-function JeffFeedCard({ label, item, navigateToJeff }: { label: string; item: JeffTodayFeedItem; navigateToJeff: () => void }) {
+/** One card per session run today. Click anywhere on the card to open the full article in
+ *  the branded modal. Same visual language as the rest of the Today page. */
+function JeffFeedCard({ item, onOpen }: { item: JeffTodayFeedItem; onOpen: () => void }) {
+  const label = KIND_LABEL[item.kind] ?? item.kind;
   return (
     <div
-      onClick={navigateToJeff}
+      onClick={onOpen}
       style={{
         border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
-        padding: '12px 16px', cursor: 'pointer', transition: 'background 0.12s',
+        padding: '14px 18px', cursor: 'pointer', transition: 'background 0.12s',
       }}
       className="row-hover"
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <Avatar who="A" size={22} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <Avatar who="A" size={26} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-            <span style={{ fontSize: 11, color: 'var(--path-primary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
-            <span style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500 }}>{item.title}</span>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, color: 'var(--path-primary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+            <span style={{ fontSize: 13, color: 'var(--fg-1)', fontWeight: 500 }}>{item.title}</span>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
             {item.summary}
           </div>
         </div>

@@ -48,29 +48,43 @@ agentRouter.get('/status', (_req, res) => {
   res.json({ ...jeffStatus(), memories: countMemories() });
 });
 
-// Today-feed: latest output from each of the three user-facing job kinds. Drives the
-// extra cards under "Jeff · week so far" on the Today view. Returns null for any kind
-// that hasn't produced output yet so the UI can cleanly skip rendering those cards.
+// Today-feed: every Jeff session run from today, plus the latest weekly summary if there's
+// one from this week. Each row carries its full `body` so the Today modal can render the
+// article without an extra fetch. Drives the cards under "Jeff · week so far" on Today.
 agentRouter.get('/today-feed', (_req, res) => {
-  const latest = (kind: string) => db.prepare(`
-    SELECT id, kind, title, summary, tags, created_at AS createdAt, updated_at AS updatedAt, source_updated_at AS sourceUpdatedAt
-    FROM jeff_memories
-    WHERE kind = ?
-    ORDER BY created_at DESC
-    LIMIT 1
-  `).get(kind) as any | undefined;
-  const shape = (row: any | undefined) => {
+  const shape = (row: any) => {
     if (!row) return null;
     let tags: string[] = [];
     try { tags = JSON.parse(row.tags ?? '[]'); } catch { /* ignore */ }
     return { ...row, tags };
   };
-  res.json({
-    dailyNews:           shape(latest('daily-news')),
-    weeklySummary:       shape(latest('weekly-summary')),
-    competitorFeatures:  shape(latest('competitor-features')),
-    researchRefresh:     shape(latest('research-refresh')),
-  });
+  // All producing kinds run today (UTC date — close enough for our cadence).
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRows = db.prepare(`
+    SELECT id, kind, title, summary, body, tags, created_at AS createdAt, updated_at AS updatedAt
+    FROM jeff_memories
+    WHERE kind IN ('daily-news', 'competitor-features', 'research-refresh', 'weekly-summary')
+      AND substr(created_at, 1, 10) = ?
+    ORDER BY created_at DESC
+  `).all(today) as any[];
+
+  // Plus the latest weekly summary from anywhere in the last 7 days, so it's still surfaced
+  // mid-week even though the job only fires Mondays.
+  const latestWeekly = db.prepare(`
+    SELECT id, kind, title, summary, body, tags, created_at AS createdAt, updated_at AS updatedAt
+    FROM jeff_memories
+    WHERE kind = 'weekly-summary'
+      AND created_at >= datetime('now', '-7 days')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get() as any | undefined;
+
+  // De-dupe — if today's set already has the weekly, don't add it twice.
+  const ids = new Set(todayRows.map((r) => r.id));
+  const runs = [...todayRows];
+  if (latestWeekly && !ids.has(latestWeekly.id)) runs.push(latestWeekly);
+
+  res.json({ runs: runs.map(shape) });
 });
 
 agentRouter.get('/conversations', (_req, res) => {
