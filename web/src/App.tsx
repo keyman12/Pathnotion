@@ -8,7 +8,7 @@ import { useSession } from './lib/useSession';
 import { WeekView } from './views/WeekView';
 import { MobileWeekView } from './views/MobileWeekView';
 import { BacklogView } from './views/BacklogView';
-import { DocsView } from './views/DocsView';
+import { DocsDriveReal } from './views/DocsDriveReal';
 import { TasksView } from './views/TasksView';
 import { CalendarView } from './views/CalendarView';
 import { JeffView } from './views/JeffView';
@@ -64,10 +64,11 @@ export function App() {
   if (route === 'week') content = isMobile ? <MobileWeekView now={now} /> : <WeekView now={now} />;
   else if (route === 'backlog') content = <BacklogView />;
   else if (route.startsWith('product:')) content = <BacklogView productFilter={route.slice('product:'.length)} />;
-  else if (route === 'docs') content = <DocsView mode="product" />;
-  else if (route === 'finance-docs') content = <DocsView mode="finance" />;
-  else if (route === 'sales-docs') content = <DocsView mode="sales" />;
-  else if (route === 'legal-docs') content = <DocsView mode="legal" />;
+  // Docs (product + all business modes) run through DocsDriveReal — single Drive-browse view.
+  else if (route === 'docs') content = <DocsDriveReal mode="product" />;
+  else if (route === 'finance-docs') content = <DocsDriveReal mode="finance" />;
+  else if (route === 'sales-docs') content = <DocsDriveReal mode="sales" />;
+  else if (route === 'legal-docs') content = <DocsDriveReal mode="legal" />;
   else if (route === 'tasks') content = <TasksView />;
   else if (route === 'calendar') content = <CalendarView />;
   else if (route === 'jeff') content = <JeffView />;

@@ -298,3 +298,24 @@ export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; on
     </div>
   );
 }
+
+/** Small info icon with a hover tooltip. Renders inline; the tooltip is a styled div positioned
+ *  via CSS variables so parents don't need relative positioning. Fine for short hint text. */
+export function InfoTip({ text, size = 12 }: { text: string; size?: number }) {
+  return (
+    <span
+      title={text}
+      tabIndex={0}
+      aria-label={text}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        color: 'var(--fg-4)',
+        cursor: 'help',
+        marginLeft: 4,
+      }}
+    >
+      <Icon name="info" size={size} />
+    </span>
+  );
+}

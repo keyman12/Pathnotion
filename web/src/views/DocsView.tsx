@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
+import { DocEditor } from '../components/DocEditor';
+import { Dropdown } from '../components/Dropdown';
 import {
   DOC_CONTENT,
   FINANCE_DOCS,
@@ -9,12 +11,13 @@ import {
   LEGAL_DOCS,
   LEGAL_FILES,
   PRODUCTS,
-  PRODUCT_DOCS,
   PRODUCT_FILES,
   SALES_DOCS,
   SALES_FILES,
 } from '../lib/seed';
 import type { Doc, DocBlock, FileEntry } from '../lib/types';
+import { useCreateDoc, useDocsTree } from '../lib/queries';
+import type { DocSummary } from '../lib/api';
 
 type Mode = 'product' | 'finance' | 'sales' | 'legal';
 type TabId = 'all' | 'pages' | 'files';
@@ -55,16 +58,41 @@ const BUSINESS_CONFIG: Record<Exclude<Mode, 'product'>, BusinessConfig> = {
   },
 };
 
+function mergeDocs(mode: Mode, apiDocs: DocSummary[]): Doc[] {
+  // The existing card components expect the frontend Doc shape; map API records into it.
+  // Only docs whose root matches the current mode show up here.
+  return apiDocs
+    .filter((d) => d.root === mode)
+    .map((d) => ({
+      id: d.id,
+      product: d.product ?? undefined,
+      group: d.group ?? undefined,
+      title: d.title,
+      updated: d.updated ?? 'today',
+      by: ((d.updatedBy ?? d.createdBy) as Doc['by']) ?? 'D',
+      size: d.size ?? '',
+      tags: d.tags ?? [],
+    }));
+}
+
 export function DocsView({ mode = 'product' }: { mode?: Mode }) {
-  const [reading, setReading] = useState<Doc | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [previewing, setPreviewing] = useState<FileEntry | null>(null);
   const [query, setQuery] = useState('');
   const [tabs, setTabs] = useState<Record<string, TabId>>({});
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
+
   const getTab = (key: string): TabId => tabs[key] || 'all';
   const setTab = (key: string, v: TabId) => setTabs((t) => ({ ...t, [key]: v }));
 
-  if (reading) return <DocReader doc={reading} onClose={() => setReading(null)} />;
+  // Pull docs from the API — merge with seed to keep classic grouping while any newly-created ones show up immediately.
+  const treeQ = useDocsTree(mode);
+  const apiDocs = treeQ.data ?? [];
+  const mergedDocs = useMemo(() => mergeDocs(mode, apiDocs), [mode, apiDocs]);
+  const createDoc = useCreateDoc();
+
+  // Editor now renders as a right-edge drawer; we still mount the docs list behind it.
 
   const q = query.trim().toLowerCase();
   const match = (item: Doc | FileEntry, pLabel?: string) => {
@@ -119,12 +147,12 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
         ))}
       </div>
       <button className="btn btn-ghost"><Icon name="upload" size={14} /> Upload</button>
-      <button className="btn btn-primary"><Icon name="plus" size={14} /> New</button>
+      <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={14} /> New</button>
     </>
   );
 
   if (cfg) {
-    const totalDocs = cfg.docs.filter((d) => match(d)).length;
+    const totalDocs = mergedDocs.filter((d) => match(d)).length;
     const totalFiles = cfg.files.filter((f) => match(f)).length;
 
     return (
@@ -133,7 +161,7 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
         {q && <SearchSummary totalDocs={totalDocs} totalFiles={totalFiles} />}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           {cfg.groups.map((g) => {
-            const gdocs = cfg.docs.filter((d) => d.group === g && match(d));
+            const gdocs = mergedDocs.filter((d) => d.group === g && match(d));
             const gfiles = cfg.files.filter((f) => f.group === g && match(f));
             if (!gdocs.length && !gfiles.length) return null;
             const tab = getTab(g);
@@ -142,14 +170,14 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
                 {layout === 'list' ? (
                   <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-surface)' }}>
                     <DocListHeader />
-                    {(tab === 'all' || tab === 'pages') && gdocs.map((d) => <DocListRow key={d.id} item={d} kind="doc" onClick={() => setReading(d)} />)}
+                    {(tab === 'all' || tab === 'pages') && gdocs.map((d) => <DocListRow key={d.id} item={d} kind="doc" onClick={() => setEditingId(d.id)} />)}
                     {(tab === 'all' || tab === 'files') && gfiles.map((f) => <DocListRow key={f.id} item={f} kind="file" onClick={() => setPreviewing(f)} />)}
                   </div>
                 ) : (
                   <>
                     {(tab === 'all' || tab === 'pages') && gdocs.length > 0 && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 10 }}>
-                        {gdocs.map((d) => <DocCard key={d.id} d={d} onClick={() => setReading(d)} />)}
+                        {gdocs.map((d) => <DocCard key={d.id} d={d} onClick={() => setEditingId(d.id)} />)}
                       </div>
                     )}
                     {(tab === 'all' || tab === 'files') && gfiles.length > 0 && (
@@ -164,11 +192,24 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
           })}
         </div>
         {previewing && <FilePreview f={previewing} onClose={() => setPreviewing(null)} />}
+        {creating && (
+          <NewDocDialog
+            mode={mode}
+            onClose={() => setCreating(false)}
+            onCreate={(body) => createDoc.mutate(body, {
+              onSuccess: (created) => {
+                setCreating(false);
+                setEditingId(created.id);
+              },
+            })}
+          />
+        )}
+        {editingId && <DocEditor docId={editingId} onClose={() => setEditingId(null)} />}
       </div>
     );
   }
 
-  const totalDocs = PRODUCT_DOCS.filter((d) => match(d, PRODUCTS.find((p) => p.id === d.product)?.label)).length;
+  const totalDocs = mergedDocs.filter((d) => match(d, PRODUCTS.find((p) => p.id === d.product)?.label)).length;
   const totalFiles = PRODUCT_FILES.filter((f) => match(f, PRODUCTS.find((p) => p.id === f.product)?.label)).length;
 
   return (
@@ -181,7 +222,7 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
       {q && <SearchSummary totalDocs={totalDocs} totalFiles={totalFiles} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {PRODUCTS.map((p) => {
-          const pdocs = PRODUCT_DOCS.filter((d) => d.product === p.id && match(d, p.label));
+          const pdocs = mergedDocs.filter((d) => d.product === p.id && match(d, p.label));
           const pfiles = PRODUCT_FILES.filter((f) => f.product === p.id && match(f, p.label));
           if (!pdocs.length && !pfiles.length) return null;
           const tab = getTab(p.id);
@@ -196,14 +237,14 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
               {layout === 'list' ? (
                 <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-surface)' }}>
                   <DocListHeader />
-                  {(tab === 'all' || tab === 'pages') && pdocs.map((d) => <DocListRow key={d.id} item={d} kind="doc" product={p.id} onClick={() => setReading(d)} />)}
+                  {(tab === 'all' || tab === 'pages') && pdocs.map((d) => <DocListRow key={d.id} item={d} kind="doc" product={p.id} onClick={() => setEditingId(d.id)} />)}
                   {(tab === 'all' || tab === 'files') && pfiles.map((f) => <DocListRow key={f.id} item={f} kind="file" product={p.id} onClick={() => setPreviewing({ ...f, product: p.id })} />)}
                 </div>
               ) : (
                 <>
                   {(tab === 'all' || tab === 'pages') && pdocs.length > 0 && (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 10 }}>
-                      {pdocs.map((d) => <DocCard key={d.id} d={d} product={p.id} onClick={() => setReading(d)} />)}
+                      {pdocs.map((d) => <DocCard key={d.id} d={d} product={p.id} onClick={() => setEditingId(d.id)} />)}
                     </div>
                   )}
                   {(tab === 'all' || tab === 'files') && pfiles.length > 0 && (
@@ -218,6 +259,19 @@ export function DocsView({ mode = 'product' }: { mode?: Mode }) {
         })}
       </div>
       {previewing && <FilePreview f={previewing} onClose={() => setPreviewing(null)} />}
+      {creating && (
+        <NewDocDialog
+          mode={mode}
+          onClose={() => setCreating(false)}
+          onCreate={(body) => createDoc.mutate(body, {
+            onSuccess: (created) => {
+              setCreating(false);
+              setEditingId(created.id);
+            },
+          })}
+        />
+      )}
+      {editingId && <DocEditor docId={editingId} onClose={() => setEditingId(null)} />}
     </div>
   );
 }
@@ -300,7 +354,7 @@ function SearchSummary({ totalDocs, totalFiles }: { totalDocs: number; totalFile
   );
 }
 
-const FILE_TYPE: Record<string, { label: string; bg: string; fg: string; sub: string }> = {
+export const FILE_TYPE: Record<string, { label: string; bg: string; fg: string; sub: string }> = {
   xlsx: { label: 'XLSX', bg: '#E7F5EA', fg: '#1E7D32', sub: 'Excel' },
   docx: { label: 'DOCX', bg: '#E5EDFB', fg: '#1E51B8', sub: 'Word' },
   pptx: { label: 'PPTX', bg: '#FBE9E2', fg: '#B14318', sub: 'PowerPoint' },
@@ -311,15 +365,15 @@ const FILE_TYPE: Record<string, { label: string; bg: string; fg: string; sub: st
   csv: { label: 'CSV', bg: '#E7F5EA', fg: '#1E7D32', sub: 'Data' },
   zip: { label: 'ZIP', bg: '#EEEEF0', fg: '#454745', sub: 'Archive' },
 };
-function fileMeta(ext: string) { return FILE_TYPE[ext] || { label: (ext || 'FILE').toUpperCase(), bg: '#F1F3F5', fg: '#46555E', sub: 'File' }; }
-function humanBytes(b: number): string {
+export function fileMeta(ext: string) { return FILE_TYPE[ext] || { label: (ext || 'FILE').toUpperCase(), bg: '#F1F3F5', fg: '#46555E', sub: 'File' }; }
+export function humanBytes(b: number): string {
   if (b == null) return '';
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileBadge({ ext, size = 36 }: { ext: string; size?: number }) {
+export function FileBadge({ ext, size = 36 }: { ext: string; size?: number }) {
   const m = fileMeta(ext);
   return (
     <div style={{
@@ -522,14 +576,45 @@ function DocReader({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   );
 }
 
-function renderBlock(b: DocBlock, i: number) {
+export function renderBlock(b: DocBlock, i: number) {
   switch (b.type) {
     case 'h1': return <h1 key={i}>{b.text}</h1>;
     case 'h2': return <h2 key={i}>{b.text}</h2>;
     case 'h3': return <h3 key={i}>{b.text}</h3>;
     case 'p': return <p key={i}>{b.text}</p>;
-    case 'ul': return <ul key={i}>{b.items.map((x, j) => <li key={j}>{x}</li>)}</ul>;
-    case 'ol': return <ol key={i}>{b.items.map((x, j) => <li key={j}>{x}</li>)}</ol>;
+    case 'ul': return (
+      <ul key={i}>
+        {b.items.map((x, j) => (
+          <li key={j}>
+            {x}
+            {b.itemsChildren?.[j] ? renderBlock(b.itemsChildren[j] as DocBlock, j) : null}
+          </li>
+        ))}
+      </ul>
+    );
+    case 'ol': return (
+      <ol key={i}>
+        {b.items.map((x, j) => (
+          <li key={j}>
+            {x}
+            {b.itemsChildren?.[j] ? renderBlock(b.itemsChildren[j] as DocBlock, j) : null}
+          </li>
+        ))}
+      </ol>
+    );
+    case 'todo': return (
+      <ul key={i} data-type="taskList">
+        {b.items.map((it, j) => (
+          <li key={j} data-checked={it.checked ? 'true' : 'false'}>
+            <label><input type="checkbox" checked={!!it.checked} readOnly /></label>
+            <div>
+              {it.text}
+              {b.itemsChildren?.[j] ? renderBlock(b.itemsChildren[j] as DocBlock, j) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
     case 'quote': return <blockquote key={i}>{b.text}</blockquote>;
     case 'code': return <pre key={i}><code>{b.text}</code></pre>;
     case 'divider': return <hr key={i} />;
@@ -557,4 +642,83 @@ function renderBlock(b: DocBlock, i: number) {
     );
     default: return null;
   }
+}
+
+// ─── New Doc dialog ────────────────────────────────────────────────────────
+
+function NewDocDialog({ mode, onClose, onCreate }: {
+  mode: Mode;
+  onClose: () => void;
+  onCreate: (body: { title: string; root: Mode; product?: string | null; group?: string | null }) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [product, setProduct] = useState<string>(mode === 'product' ? PRODUCTS[0]?.id ?? '' : '');
+  const cfg = mode !== 'product' ? BUSINESS_CONFIG[mode] : null;
+  const [group, setGroup] = useState<string>(cfg?.groups[0] ?? '');
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    onCreate({
+      title: title.trim(),
+      root: mode,
+      product: mode === 'product' ? product : null,
+      group: mode === 'product' ? null : group,
+    });
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,26,0.55)' }} />
+      <form onSubmit={submit} style={{
+        position: 'relative',
+        width: 440,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 10,
+        padding: 24,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        boxShadow: 'var(--shadow-3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: 'var(--fg-1)' }}>New doc</h2>
+          <button type="button" onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={14} /></button>
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Title</span>
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" style={{ height: 34 }} placeholder="e.g. Onboarding KPIs" />
+        </label>
+
+        {mode === 'product' ? (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Product</span>
+            <Dropdown<string>
+              value={product}
+              onChange={setProduct}
+              options={PRODUCTS.map((p) => ({ value: p.id, label: p.label }))}
+              ariaLabel="Product"
+            />
+          </label>
+        ) : cfg && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Group</span>
+            <Dropdown<string>
+              value={group}
+              onChange={setGroup}
+              options={cfg.groups.map((g) => ({ value: g, label: g }))}
+              ariaLabel="Group"
+            />
+          </label>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={!title.trim()}>Create and open</button>
+        </div>
+      </form>
+    </div>
+  );
 }

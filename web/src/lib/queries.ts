@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import type { ApiError, BusinessCategory, NotificationPrefs, Subfolder } from './api';
+import type { ApiError, BusinessCategory, NotificationPrefs } from './api';
 import type { BacklogItem, CalendarEvent, Task } from './types';
 
 // Every hook assumes the session is authed (App gates on it).
@@ -127,15 +127,219 @@ export function useDeleteEvent() {
   });
 }
 
-// Agent (read-only for now)
+export function useSyncCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.calendar.sync(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar'] });
+      qc.invalidateQueries({ queryKey: ['calendar', 'google', 'status'] });
+    },
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+// Agent / Jeff
+export function useJeffStatus() {
+  return useQuery({ queryKey: ['agent', 'status'], queryFn: () => api.agent.status(), staleTime: 30_000 });
+}
+export function useJeffConversation() {
+  return useQuery({ queryKey: ['agent', 'conversations'], queryFn: () => api.agent.conversations() });
+}
+export function useSendJeffMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (text: string) => api.agent.sendMessage(text),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'conversations'] }),
+  });
+}
+export function useClearJeffConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.agent.clearConversations(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'conversations'] }),
+  });
+}
 export function useAgentRuns() {
-  return useQuery({ queryKey: ['agent', 'runs'], queryFn: () => api.agent.runs() });
+  return useQuery({ queryKey: ['agent', 'runs'], queryFn: () => api.agent.runs(), staleTime: 15_000 });
 }
 export function useAgentJobs() {
-  return useQuery({ queryKey: ['agent', 'jobs'], queryFn: () => api.agent.schedule() });
+  return useQuery({ queryKey: ['agent', 'jobs'], queryFn: () => api.agent.schedule(), staleTime: 15_000 });
+}
+export function useJobPromptDefaults() {
+  return useQuery({ queryKey: ['agent', 'prompt-defaults'], queryFn: () => api.agent.promptDefaults(), staleTime: 5 * 60_000 });
+}
+export function usePatchAgentJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Parameters<typeof api.agent.patchJob>[1] }) =>
+      api.agent.patchJob(args.id, args.patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'jobs'] }),
+  });
+}
+export function useCreateAgentJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.agent.createJob>[0]) => api.agent.createJob(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'jobs'] }),
+  });
+}
+export function useDeleteAgentJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.agent.deleteJob(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'jobs'] }),
+  });
+}
+export function useRunAgentJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.agent.runJobNow(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'jobs'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'runs'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'memories'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'status'] });
+    },
+  });
+}
+export function useJeffMemories(kind?: string, limit?: number) {
+  return useQuery({
+    queryKey: ['agent', 'memories', kind ?? 'all', limit ?? 'default'],
+    queryFn: () => api.agent.memories(kind, limit),
+    staleTime: 30_000,
+  });
+}
+export function useScanMemories() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.agent.scanMemories(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'memories'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'status'] });
+    },
+  });
+}
+export function useScanDriveFiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.agent.scanDriveFiles(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'memories'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'status'] });
+    },
+  });
+}
+export function useClearMemories() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (kind?: string) => api.agent.clearMemories(kind),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'memories'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'status'] });
+    },
+  });
 }
 export function useAccess() {
   return useQuery({ queryKey: ['agent', 'access'], queryFn: () => api.agent.access() });
+}
+
+// Jeff — pinned folders (scan scope)
+export function usePinnedFolders() {
+  return useQuery({ queryKey: ['agent', 'pinned-folders'], queryFn: () => api.agent.pinnedFolders.list(), staleTime: 30_000 });
+}
+export function usePinFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { driveFolderId: string; folderName: string }) =>
+      api.agent.pinnedFolders.pin(args.driveFolderId, args.folderName),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'pinned-folders'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'settings'] });
+    },
+  });
+}
+export function useUnpinFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (driveFolderId: string) => api.agent.pinnedFolders.unpin(driveFolderId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent', 'pinned-folders'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'settings'] });
+    },
+  });
+}
+
+// Jeff — operational settings (scan cap)
+export function useJeffSettings() {
+  return useQuery({ queryKey: ['agent', 'settings'], queryFn: () => api.agent.settings.get(), staleTime: 30_000 });
+}
+export function useSaveJeffSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.agent.settings.put>[0]) => api.agent.settings.put(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'settings'] }),
+  });
+}
+
+// Jeff style sheet
+export function useJeffStyleSheet() {
+  return useQuery({ queryKey: ['agent', 'style-sheet'], queryFn: () => api.agent.styleSheet.get(), staleTime: 60_000 });
+}
+export function useSaveJeffStyleSheet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Parameters<typeof api.agent.styleSheet.put>[0]) => api.agent.styleSheet.put(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'style-sheet'] }),
+  });
+}
+export function useUploadJeffLogo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ variant, file }: { variant: 'light' | 'dark'; file: File }) =>
+      api.agent.styleSheet.uploadLogo(variant, file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'style-sheet'] }),
+  });
+}
+export function useClearJeffLogo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (variant: 'light' | 'dark') => api.agent.styleSheet.clearLogo(variant),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'style-sheet'] }),
+  });
+}
+
+// Competitors
+export function useCompetitors() {
+  return useQuery({ queryKey: ['agent', 'competitors'], queryFn: () => api.agent.competitors.list(), staleTime: 30_000 });
+}
+export function useCreateCompetitor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.agent.competitors.create>[0]) => api.agent.competitors.create(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'competitors'] }),
+  });
+}
+export function usePatchCompetitor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Parameters<typeof api.agent.competitors.patch>[1] }) =>
+      api.agent.competitors.patch(args.id, args.patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'competitors'] }),
+  });
+}
+export function useDeleteCompetitor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.agent.competitors.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'competitors'] }),
+  });
+}
+export function useTrackedFeatures(competitorId?: string) {
+  return useQuery({
+    queryKey: ['agent', 'tracked-features', competitorId ?? 'all'],
+    queryFn: () => api.agent.trackedFeatures(competitorId),
+  });
 }
 
 // Users (admin)
@@ -214,29 +418,195 @@ export function useDeleteBusinessCategory() {
   });
 }
 
-// Subfolders
-export function useSubfolders(productId?: string) {
-  return useQuery({ queryKey: ['subfolders', productId ?? 'all'], queryFn: () => api.subfolders.list(productId) });
-}
-export function useCreateSubfolder() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: Parameters<typeof api.subfolders.create>[0]) => api.subfolders.create(body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+// Docs
+type DocRoot = 'product' | 'finance' | 'sales' | 'legal';
+
+export function useDocsTree(root: DocRoot = 'product') {
+  return useQuery({
+    queryKey: ['docs', 'tree', root],
+    queryFn: () => api.docs.tree(root),
+    staleTime: 30_000,
   });
 }
-export function usePatchSubfolder() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: { id: number; patch: Parameters<typeof api.subfolders.patch>[1] }) => api.subfolders.patch(args.id, args.patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+
+export function useDoc(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['docs', 'one', id],
+    queryFn: () => api.docs.get(id as string),
+    enabled: !!id,
+    staleTime: 10_000,
   });
 }
-export function useDeleteSubfolder() {
+
+export function useCreateDoc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api.subfolders.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['subfolders'] }),
+    mutationFn: (body: Parameters<typeof api.docs.create>[0]) => api.docs.create(body),
+    onSuccess: (doc) => {
+      qc.invalidateQueries({ queryKey: ['docs', 'tree'] });
+      qc.invalidateQueries({ queryKey: ['docs', 'articles'] });
+      qc.setQueryData(['docs', 'one', doc.id], doc);
+    },
+  });
+}
+
+export function useArticlesInFolder(folder: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['docs', 'articles', folder ?? '__all__'],
+    queryFn: () => api.docs.articles(folder),
+    staleTime: 20_000,
+    enabled,
+  });
+}
+
+export function useDeleteDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.docs.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['docs', 'tree'] });
+      qc.invalidateQueries({ queryKey: ['docs', 'articles'] });
+    },
+  });
+}
+
+export function usePatchDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Parameters<typeof api.docs.patch>[1] }) => api.docs.patch(args.id, args.patch),
+    onSuccess: (_, vars) => {
+      // Title changes affect the tree list; content changes may too (updated timestamp).
+      qc.invalidateQueries({ queryKey: ['docs', 'tree'] });
+      qc.invalidateQueries({ queryKey: ['docs', 'one', vars.id] });
+    },
+  });
+}
+
+// Google Drive — workspace-wide config + shared drive picker
+export function useDriveConfig() {
+  return useQuery({
+    queryKey: ['drive', 'config'],
+    queryFn: () => api.drive.config(),
+    staleTime: 30_000,
+  });
+}
+export function useSharedDrives() {
+  return useQuery({
+    queryKey: ['drive', 'shared-drives'],
+    queryFn: () => api.drive.sharedDrives(),
+    staleTime: 60_000,
+  });
+}
+export function useSetWorkspaceDrive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.drive.setDrive>[0]) => api.drive.setDrive(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['drive'] }),
+  });
+}
+
+/** Fetch children of a Drive folder (or of the shared-drive root if `parent` is undefined).
+ *  `kind` narrows to folders-only or files-only. Lazy-loading the tree uses folders-only. */
+export function useDriveChildren(parent?: string, kind?: 'folders' | 'files', enabled = true) {
+  return useQuery({
+    queryKey: ['drive', 'children', parent ?? '__root__', kind ?? 'all'],
+    queryFn: () => api.drive.children(parent, kind),
+    staleTime: 20_000,
+    enabled,
+  });
+}
+
+/** Fetch metadata for a single Drive entry. Used by the preview drawer and the selection toolbar. */
+export function useDriveEntry(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['drive', 'entry', id],
+    queryFn: () => api.drive.entry(id as string),
+    enabled: !!id,
+    staleTime: 20_000,
+  });
+}
+
+/** Create a new Drive sub-folder under `parent`. Returns the new folder entry. */
+export function useCreateDriveFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.drive.createFolder>[0]) => api.drive.createFolder(body),
+    onSuccess: (_entry, vars) => {
+      qc.invalidateQueries({ queryKey: ['drive', 'children', vars.parent ?? '__root__'] });
+      // Folders-only query is keyed separately; invalidate broadly.
+      qc.invalidateQueries({ queryKey: ['drive', 'children'] });
+    },
+  });
+}
+
+/** Upload a file into a Drive folder, then refresh the listing for that folder. */
+export function useUploadToDriveFolder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { parent: string; file: File }) => api.drive.upload(args.parent, args.file),
+    onSuccess: (_entry, vars) => {
+      qc.invalidateQueries({ queryKey: ['drive', 'children', vars.parent] });
+    },
+  });
+}
+
+/** Rename a Drive file. We broadly invalidate the children cache — name ordering may shift. */
+export function useRenameDriveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; name: string }) => api.drive.rename(args.id, args.name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drive', 'children'] });
+    },
+  });
+}
+
+/** Trash a Drive file. Refresh both source folder and the generic cache. */
+export function useTrashDriveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.drive.trash(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drive', 'children'] });
+    },
+  });
+}
+
+/** Move a Drive file to another folder. */
+export function useMoveDriveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; parentId: string; fromParentId?: string }) =>
+      api.drive.move(args.id, args.parentId, args.fromParentId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['drive', 'children'] });
+    },
+  });
+}
+
+// Google Calendar connection
+export function useGoogleCalendarStatus() {
+  return useQuery({
+    queryKey: ['calendar', 'google', 'status'],
+    queryFn: () => api.calendar.google.status(),
+    staleTime: 30_000,
+  });
+}
+export function useConnectGoogleCalendar() {
+  return useMutation({
+    mutationFn: () => api.calendar.google.connect(),
+  });
+}
+export function useDisconnectGoogleCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.calendar.google.disconnect(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['calendar', 'google'] }),
+  });
+}
+export function useTestGoogleCalendar() {
+  return useMutation({
+    mutationFn: () => api.calendar.google.test(),
   });
 }
 

@@ -79,7 +79,7 @@ export function MobileMenu() {
         <div className="m-drawer__section">
           <MetaLabel>Workspace</MetaLabel>
           {[
-            { r: 'week' as Route, label: 'This Week', icon: 'week' as IconName },
+            { r: 'week' as Route, label: 'Today', icon: 'week' as IconName },
             { r: 'backlog' as Route, label: 'Backlog', icon: 'backlog' as IconName },
             { r: 'docs' as Route, label: 'Documentation', icon: 'docs' as IconName },
             { r: 'tasks' as Route, label: 'Tasks', icon: 'tasks' as IconName },

@@ -4,28 +4,51 @@ import { db } from '../db/client.js';
 
 export const tasksRouter = Router();
 
+const attachmentSchema = z.object({
+  type: z.enum(['doc', 'file', 'url', 'backlog']),
+  ref: z.string().min(1),
+  label: z.string().optional(),
+});
+
 const SELECT_TASK = `
   SELECT id,
          title,
          owner_key AS owner,
          due,
          done,
-         link_type AS linkType,
-         link_ref AS linkRef,
+         priority,
+         attachments AS attachmentsJson,
          sort_order AS sortOrder
   FROM tasks
 `;
 
-type TaskRow = { id: number; title: string; owner: string; due: string; done: number; linkType: string | null; linkRef: string | null; sortOrder: number };
+type TaskRow = {
+  id: number;
+  title: string;
+  owner: string;
+  due: string;
+  done: number;
+  priority: string | null;
+  attachmentsJson: string | null;
+  sortOrder: number;
+};
 
 function mapTask(row: TaskRow) {
+  let attachments: Array<{ type: string; ref: string; label?: string }> = [];
+  if (row.attachmentsJson) {
+    try {
+      const parsed = JSON.parse(row.attachmentsJson);
+      if (Array.isArray(parsed)) attachments = parsed;
+    } catch { /* ignore malformed */ }
+  }
   return {
     id: row.id,
     title: row.title,
     owner: row.owner,
     due: row.due,
     done: Boolean(row.done),
-    link: row.linkType && row.linkRef ? { type: row.linkType, ref: row.linkRef } : null,
+    priority: row.priority,
+    attachments,
     sortOrder: row.sortOrder,
   };
 }
@@ -35,11 +58,14 @@ tasksRouter.get('/', (_req, res) => {
   res.json(rows.map(mapTask));
 });
 
+const prioritySchema = z.enum(['P1', 'P2', 'P3']);
+
 const createSchema = z.object({
   title: z.string().min(1),
   owner: z.enum(['D', 'R']),
   due: z.string().min(1),
-  link: z.object({ type: z.enum(['doc', 'backlog']), ref: z.string() }).nullish(),
+  priority: prioritySchema.nullish(),
+  attachments: z.array(attachmentSchema).optional(),
 });
 
 tasksRouter.post('/', (req, res) => {
@@ -47,14 +73,14 @@ tasksRouter.post('/', (req, res) => {
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS n FROM tasks').get() as { n: number }).n;
   const info = db.prepare(`
-    INSERT INTO tasks (title, owner_key, due, done, link_type, link_ref, sort_order)
-    VALUES (@title, @owner, @due, 0, @linkType, @linkRef, @sort_order)
+    INSERT INTO tasks (title, owner_key, due, done, priority, attachments, sort_order)
+    VALUES (@title, @owner, @due, 0, @priority, @attachments, @sort_order)
   `).run({
     title: parsed.data.title,
     owner: parsed.data.owner,
     due: parsed.data.due,
-    linkType: parsed.data.link?.type ?? null,
-    linkRef: parsed.data.link?.ref ?? null,
+    priority: parsed.data.priority ?? null,
+    attachments: parsed.data.attachments ? JSON.stringify(parsed.data.attachments) : null,
     sort_order: maxOrder + 1,
   });
   const row = db.prepare(SELECT_TASK + ' WHERE id = ?').get(info.lastInsertRowid) as TaskRow;
@@ -66,7 +92,8 @@ const patchSchema = z.object({
   owner: z.enum(['D', 'R']).optional(),
   due: z.string().optional(),
   done: z.boolean().optional(),
-  link: z.object({ type: z.enum(['doc', 'backlog']), ref: z.string() }).nullish(),
+  priority: prioritySchema.nullish(),
+  attachments: z.array(attachmentSchema).nullish(),
   sortOrder: z.number().int().optional(),
 });
 
@@ -80,11 +107,11 @@ tasksRouter.patch('/:id', (req, res) => {
   if (parsed.data.owner !== undefined) { sets.push('owner_key = @owner'); params.owner = parsed.data.owner; }
   if (parsed.data.due !== undefined) { sets.push('due = @due'); params.due = parsed.data.due; }
   if (parsed.data.done !== undefined) { sets.push('done = @done'); params.done = parsed.data.done ? 1 : 0; }
+  if (parsed.data.priority !== undefined) { sets.push('priority = @priority'); params.priority = parsed.data.priority ?? null; }
   if (parsed.data.sortOrder !== undefined) { sets.push('sort_order = @sortOrder'); params.sortOrder = parsed.data.sortOrder; }
-  if (parsed.data.link !== undefined) {
-    sets.push('link_type = @linkType', 'link_ref = @linkRef');
-    params.linkType = parsed.data.link?.type ?? null;
-    params.linkRef = parsed.data.link?.ref ?? null;
+  if (parsed.data.attachments !== undefined) {
+    sets.push('attachments = @attachments');
+    params.attachments = parsed.data.attachments === null ? null : JSON.stringify(parsed.data.attachments);
   }
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   sets.push("updated_at = datetime('now')");

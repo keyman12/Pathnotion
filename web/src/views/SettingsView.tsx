@@ -1,33 +1,51 @@
 import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
-import { Avatar } from '../components/primitives';
+import { Avatar, InfoTip } from '../components/primitives';
+import { Dropdown } from '../components/Dropdown';
 import { Icon } from '../components/Icon';
 import {
   useBusinessCategories,
+  useClearJeffLogo,
+  useCompetitors,
+  useConnectGoogleCalendar,
   useCreateBusinessCategory,
+  useCreateCompetitor,
   useCreateProduct,
-  useCreateSubfolder,
   useCreateUser,
   useDeleteBusinessCategory,
+  useDeleteCompetitor,
   useDeleteProduct,
-  useDeleteSubfolder,
+  useDisconnectGoogleCalendar,
+  useDriveConfig,
+  useGoogleCalendarStatus,
+  useJeffSettings,
+  useJeffStyleSheet,
   useNotificationPrefs,
   usePatchBusinessCategory,
+  usePatchCompetitor,
   usePatchNotificationPrefs,
   usePatchProduct,
-  usePatchSubfolder,
   usePatchUser,
+  usePinnedFolders,
   useProducts,
   useResetUserPassword,
+  useSaveJeffSettings,
+  useSaveJeffStyleSheet,
   useSendDigestTest,
-  useSubfolders,
+  useSetWorkspaceDrive,
+  useSharedDrives,
+  useTestGoogleCalendar,
+  useUnpinFolder,
+  useUploadJeffLogo,
   useUsers,
 } from '../lib/queries';
 import { useSession } from '../lib/useSession';
-import type { BusinessCategory, NotificationPrefs, SessionUser, Subfolder } from '../lib/api';
+import { useUI } from '../lib/store';
+import { api } from '../lib/api';
+import type { BusinessCategory, JeffCompetitor, JeffLogoRef, JeffStyleSheet, JeffTypeScale, NotificationPrefs, SessionUser } from '../lib/api';
 import type { Product } from '../lib/types';
 
-type Tab = 'users' | 'products' | 'categories' | 'subfolders' | 'notifications';
+type Tab = 'users' | 'products' | 'categories' | 'jeff' | 'google' | 'notifications';
 
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>('users');
@@ -43,7 +61,8 @@ export function SettingsView() {
           { id: 'users', label: 'Users' },
           { id: 'products', label: 'Products' },
           { id: 'categories', label: 'Business categories' },
-          { id: 'subfolders', label: 'Sub-folders' },
+          { id: 'jeff', label: 'Jeff' },
+          { id: 'google', label: 'Google' },
           { id: 'notifications', label: 'Notifications' },
         ]}
         activeTab={tab}
@@ -53,7 +72,8 @@ export function SettingsView() {
       {tab === 'users' && (isAdmin ? <UsersTab /> : <NotAllowed />)}
       {tab === 'products' && (isAdmin ? <ProductsTab /> : <NotAllowed />)}
       {tab === 'categories' && (isAdmin ? <CategoriesTab /> : <NotAllowed />)}
-      {tab === 'subfolders' && (isAdmin ? <SubfoldersTab /> : <NotAllowed />)}
+      {tab === 'jeff' && (isAdmin ? <JeffTab /> : <NotAllowed />)}
+      {tab === 'google' && <GoogleTab />}
       {tab === 'notifications' && <NotificationsTab />}
     </div>
   );
@@ -312,11 +332,13 @@ function CategoryDialog({ title, initial, onClose, onSubmit }: {
           <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} className="input" style={{ height: 32, width: '100%' }} />
         </Labelled>
         <Labelled label="Icon">
-          <select value={icon} onChange={(e) => setIcon(e.target.value)} className="input" style={{ height: 32, padding: '0 8px', width: 180 }}>
-            {['money', 'trend-up', 'scale', 'users', 'file', 'sheet', 'settings', 'boarding', 'shield', 'sparkle'].map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
+          <Dropdown<string>
+            value={icon}
+            onChange={setIcon}
+            options={['money', 'trend-up', 'scale', 'users', 'file', 'sheet', 'settings', 'boarding', 'shield', 'sparkle'].map((o) => ({ value: o, label: o }))}
+            style={{ width: 180 }}
+            ariaLabel="Icon"
+          />
         </Labelled>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
@@ -329,116 +351,223 @@ function CategoryDialog({ title, initial, onClose, onSubmit }: {
   );
 }
 
-function SubfoldersTab() {
-  const productsQ = useProducts();
-  const subfoldersQ = useSubfolders();
-  const createSf = useCreateSubfolder();
-  const patchSf = usePatchSubfolder();
-  const deleteSf = useDeleteSubfolder();
-  const [newForProduct, setNewForProduct] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Subfolder | null>(null);
-
-  const products = productsQ.data ?? [];
-  const subfolders = subfoldersQ.data ?? [];
-
+function GoogleTab() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>
-        Sub-folders scope backlog items inside a product (e.g. Dashboard / dave). Tag items with a sub-folder in the Backlog view.
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {products.map((p) => {
-          const my = subfolders.filter((sf) => sf.productId === p.id);
-          return (
-            <div key={p.id} style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 8,
-              padding: '14px 16px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: my.length ? 10 : 0 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: p.color }} />
-                <span style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--fg-1)' }}>{p.label}</span>
-                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{my.length} sub-folder{my.length === 1 ? '' : 's'}</span>
-                <div style={{ flex: 1 }} />
-                <button className="btn btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setNewForProduct(p.id)}>
-                  <Icon name="plus" size={12} /> Add
-                </button>
-              </div>
-              {my.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {my.map((sf) => (
-                    <div key={sf.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '8px 10px',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 6,
-                    }}>
-                      <span style={{ fontSize: 13, color: 'var(--fg-2)', flex: 1 }}>{sf.name}</span>
-                      <button className="btn btn-subtle btn-icon" title="Edit" onClick={() => setEditing(sf)}>
-                        <Icon name="edit" size={12} />
-                      </button>
-                      <button
-                        className="btn btn-subtle btn-icon"
-                        title="Delete"
-                        onClick={() => { if (confirm(`Delete sub-folder "${sf.name}"?`)) deleteSf.mutate(sf.id); }}
-                        style={{ color: 'var(--danger-fg)' }}
-                      >
-                        <Icon name="close" size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {newForProduct && (
-        <SubfolderDialog
-          title={`New sub-folder · ${products.find((p) => p.id === newForProduct)?.label ?? ''}`}
-          onClose={() => setNewForProduct(null)}
-          onSubmit={(name) => createSf.mutate({ productId: newForProduct, name }, { onSuccess: () => setNewForProduct(null) })}
-        />
-      )}
-      {editing && (
-        <SubfolderDialog
-          title="Rename sub-folder"
-          initial={editing.name}
-          onClose={() => setEditing(null)}
-          onSubmit={(name) => patchSf.mutate({ id: editing.id, patch: { name } }, { onSuccess: () => setEditing(null) })}
-        />
-      )}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <CalendarTab />
+      <DriveTab />
     </div>
   );
 }
 
-function SubfolderDialog({ title, initial = '', onClose, onSubmit }: {
-  title: string;
-  initial?: string;
-  onClose: () => void;
-  onSubmit: (name: string) => void;
-}) {
-  const [name, setName] = useState(initial);
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    onSubmit(name.trim());
+function DriveTab() {
+  const cfgQ = useDriveConfig();
+  const drivesQ = useSharedDrives();
+  const setDrive = useSetWorkspaceDrive();
+  const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'err'; msg?: string }>({ kind: 'idle' });
+
+  const cfg = cfgQ.data;
+  const drives = drivesQ.data ?? [];
+  const drivesError = drivesQ.error as (Error & { status?: number }) | undefined;
+
+  const pick = async (driveId: string, driveName: string) => {
+    setStatus({ kind: 'idle' });
+    try {
+      await setDrive.mutateAsync({ driveId, driveName });
+      setStatus({ kind: 'ok', msg: `Connected to "${driveName}". Jeff's folder created.` });
+    } catch (err) {
+      setStatus({ kind: 'err', msg: (err as Error).message });
+    }
   };
+
   return (
-    <Modal title={title} onClose={onClose}>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Labelled label="Name">
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="input" style={{ height: 32, width: '100%' }} />
-        </Labelled>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-          <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!name.trim()}>Save</button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg-1)', marginBottom: 4 }}>Drive workspace</div>
+        <div style={{ fontSize: 12.5, color: 'var(--fg-3)', maxWidth: 640 }}>
+          PathNotion reads and writes files inside one shared drive. Pick the drive both founders use, and we'll
+          create a <b>Jeff</b> folder at its root for agent outputs.
         </div>
-      </form>
-    </Modal>
+      </div>
+
+      <div style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        padding: '18px 20px',
+        maxWidth: 640,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}>
+        {drivesQ.isLoading && <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>Loading your shared drives…</div>}
+
+        {drivesError && (
+          <div style={{ fontSize: 12.5, color: 'var(--danger-fg)' }}>
+            {drivesError.status === 404 ? 'Connect Google first (above), then reload.' : `Couldn't list shared drives: ${drivesError.message}`}
+          </div>
+        )}
+
+        {!drivesQ.isLoading && !drivesError && drives.length === 0 && (
+          <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>
+            No shared drives visible to your account. Create one in Google Drive first, or ask your Workspace admin.
+          </div>
+        )}
+
+        {drives.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {drives.map((d) => {
+              const selected = cfg?.driveId === d.id;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => pick(d.id, d.name)}
+                  disabled={setDrive.isPending}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 12px',
+                    border: '1px solid ' + (selected ? 'var(--path-primary)' : 'var(--border-subtle)'),
+                    background: selected ? 'var(--path-primary-tint)' : 'var(--bg-surface)',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: d.colorRgb ?? 'var(--fg-3)', flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: 'var(--fg-1)', fontWeight: 500, flex: 1 }}>{d.name}</span>
+                  {selected && (
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--path-primary)' }}>SELECTED</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {cfg?.driveName && (
+          <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+            Current: <b>{cfg.driveName}</b>
+            {cfg.jeffFolderId && <span style={{ marginLeft: 8, color: 'var(--path-primary)' }}>Jeff folder ready.</span>}
+          </div>
+        )}
+
+        {status.kind === 'ok' && <span style={{ fontSize: 12, color: 'var(--path-primary)' }}>{status.msg}</span>}
+        {status.kind === 'err' && <span style={{ fontSize: 12, color: 'var(--danger-fg)' }}>{status.msg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function CalendarTab() {
+  const session = useSession();
+  const statusQ = useGoogleCalendarStatus();
+  const connect = useConnectGoogleCalendar();
+  const disconnect = useDisconnectGoogleCalendar();
+  const test = useTestGoogleCalendar();
+  const [testResult, setTestResult] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+
+  // When the OAuth popup completes, it posts a message to re-fetch status.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'pn:calendar-connected') {
+        statusQ.refetch();
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [statusQ]);
+
+  const s = statusQ.data;
+
+  const startConnect = async () => {
+    try {
+      const { url } = await connect.mutateAsync();
+      // Open the Google consent in a popup; callback tab closes itself.
+      window.open(url, 'pn-google-connect', 'width=540,height=720');
+    } catch (err) {
+      setTestResult({ kind: 'err', msg: (err as Error).message });
+    }
+  };
+
+  const runTest = async () => {
+    setTestResult(null);
+    try {
+      const r = await test.mutateAsync();
+      if (r.ok) setTestResult({ kind: 'ok', msg: `Connected to "${r.primaryCalendar ?? 'primary'}".` });
+      else setTestResult({ kind: 'err', msg: r.error ?? 'Test failed.' });
+    } catch (err) {
+      setTestResult({ kind: 'err', msg: (err as Error).message });
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--fg-3)', maxWidth: 640 }}>
+        Each person connects their own Google Calendar. Events sync in both directions — changes here push
+        back to your Google calendar, and changes in Google flow in.
+      </div>
+
+      <div style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        padding: '18px 20px',
+        maxWidth: 640,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Avatar who={(session.data?.key as 'D' | 'R' | 'A') ?? 'A'} size={32} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500 }}>
+              {session.data?.displayName ?? 'You'}
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+              {statusQ.isLoading ? 'checking…'
+                : !s?.configured ? 'Not configured on server (missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).'
+                : s.connected ? (s.email ?? 'Connected')
+                : 'Not connected'}
+            </div>
+          </div>
+          {s?.configured && !s.connected && (
+            <button className="btn btn-primary" onClick={startConnect} disabled={connect.isPending}>
+              <Icon name="plus" size={13} /> {connect.isPending ? 'Opening…' : 'Connect Google Calendar'}
+            </button>
+          )}
+          {s?.connected && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => { if (confirm('Disconnect Google Calendar? Your synced events will remain.')) disconnect.mutate(); }}
+              disabled={disconnect.isPending}
+            >
+              Disconnect
+            </button>
+          )}
+        </div>
+
+        {s?.connected && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-ghost" onClick={runTest} disabled={test.isPending}>
+              {test.isPending ? 'Testing…' : 'Test connection'}
+            </button>
+            {s.lastSyncAt && (
+              <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>
+                Last sync: {s.lastSyncAt}
+              </span>
+            )}
+            {testResult && (
+              <span style={{ fontSize: 12, color: testResult.kind === 'ok' ? 'var(--path-primary)' : 'var(--danger-fg)' }}>
+                {testResult.msg}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -690,10 +819,16 @@ function NewUserDialog({ onClose, onCreate }: {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" style={{ height: 32, width: '100%' }} placeholder="Min 8 characters" />
         </Labelled>
         <Labelled label="Role">
-          <select value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'member')} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
+          <Dropdown<'admin' | 'member'>
+            value={role}
+            onChange={setRole}
+            options={[
+              { value: 'member', label: 'Member' },
+              { value: 'admin',  label: 'Admin' },
+            ]}
+            style={{ width: 140 }}
+            ariaLabel="Role"
+          />
         </Labelled>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
@@ -732,10 +867,16 @@ function EditUserDialog({ user, onClose, onPatch }: {
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input" style={{ height: 32, width: '100%' }} />
         </Labelled>
         <Labelled label="Role">
-          <select value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'member')} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
+          <Dropdown<'admin' | 'member'>
+            value={role}
+            onChange={setRole}
+            options={[
+              { value: 'member', label: 'Member' },
+              { value: 'admin',  label: 'Admin' },
+            ]}
+            style={{ width: 140 }}
+            ariaLabel="Role"
+          />
         </Labelled>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
@@ -801,6 +942,732 @@ function Labelled({ label, children }: { label: string; children: React.ReactNod
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ─── Jeff tab: style sheet + competitors ───────────────────────────────────
+
+function JeffTab() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <ScanScopePanel />
+      <StyleSheetPanel />
+      <CompetitorsPanel />
+    </div>
+  );
+}
+
+function ScanScopePanel() {
+  const settingsQ = useJeffSettings();
+  const pinnedQ = usePinnedFolders();
+  const save = useSaveJeffSettings();
+  const unpin = useUnpinFolder();
+  const [cap, setCap] = useState<number | ''>('');
+
+  useEffect(() => {
+    if (settingsQ.data && cap === '') setCap(settingsQ.data.scanCap);
+  }, [settingsQ.data, cap]);
+
+  const pinned = pinnedQ.data ?? [];
+
+  const onSave = async () => {
+    const value = Number(cap);
+    if (!Number.isFinite(value) || value < 1 || value > 500) return alert('Scan cap must be a number between 1 and 500.');
+    try { await save.mutateAsync({ scanCap: value }); }
+    catch (err) { alert(`Save failed: ${(err as Error).message}`); }
+  };
+
+  const capTip = 'Cap is split evenly across pinned folders. Pinning a folder scans it and everything inside (up to 4 levels deep). Default 40 — bump higher once you know Anthropic cost.';
+  const noPinsTip = "With no folders pinned, Jeff's Drive scan is skipped — nothing to read.";
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', margin: 0 }}>Jeff's scan scope</h2>
+        <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Which folders Jeff reads on a Drive scan.</span>
+      </div>
+
+      <div style={{
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        padding: 14,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginBottom: 10 }}>
+          <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', letterSpacing: '0.06em', textTransform: 'uppercase', display: 'inline-flex', alignItems: 'center' }}>
+            Pinned folders · {pinned.length}
+            {pinned.length === 0 && <InfoTip text={noPinsTip} />}
+          </div>
+
+          {/* Inline cap editor — single line. Info icon replaces the paragraph hint. */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Cap
+            </span>
+            <InfoTip text={capTip} />
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={cap}
+              onChange={(e) => setCap(e.target.value === '' ? '' : Number(e.target.value))}
+              className="input"
+              style={{ width: 64, height: 28, padding: '0 8px', fontSize: 12 }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={onSave}
+              disabled={save.isPending}
+              style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+              title="Save cap"
+            >
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+
+        {pinned.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--fg-3)', padding: '8px 2px' }}>
+            Nothing pinned yet. Open <b>Documentation</b> and click the pin icon on any folder in the left tree.
+          </div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 8,
+          }}>
+            {pinned.map((p) => (
+              <div key={p.driveFolderId} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 6px 6px 10px',
+                border: '1px solid var(--border-subtle)', borderRadius: 6,
+                background: 'var(--bg-sunken)',
+                fontSize: 12, color: 'var(--fg-1)',
+                minWidth: 0,
+              }}>
+                <Icon name="pin" size={11} color="var(--path-primary)" />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {p.folderName}
+                </span>
+                <button
+                  onClick={() => unpin.mutate(p.driveFolderId)}
+                  className="btn btn-subtle btn-icon"
+                  title="Unpin"
+                  style={{ padding: 2, width: 20, height: 20 }}
+                >
+                  <Icon name="close" size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Style sheet panel ──────────────────────────────────────────────────────
+// Structured editor for Jeff's house style. Splits into Voice · Brand · Colours ·
+// Typography · Logos · Output guides. Every field feeds Jeff's system prompt and
+// the file renderers (PowerPoint today, PDF/Excel later).
+
+const COLOUR_FIELDS: Array<{ key: keyof NonNullable<JeffStyleSheet['brand']>; label: string }> = [
+  { key: 'colorPrimary',         label: 'Primary' },
+  { key: 'colorPrimaryLight1',   label: 'Primary light 1' },
+  { key: 'colorPrimaryLight2',   label: 'Primary light 2' },
+  { key: 'colorSecondary',       label: 'Secondary' },
+  { key: 'colorSecondaryLight1', label: 'Secondary light 1' },
+  { key: 'colorSecondaryLight2', label: 'Secondary light 2' },
+  { key: 'colorNeutralDark',     label: 'Neutral dark' },
+  { key: 'colorNeutralLight',    label: 'Neutral light' },
+];
+
+const TYPE_SCALE_FIELDS: Array<{ key: keyof JeffTypeScale; label: string }> = [
+  { key: 'h0', label: 'H0' },
+  { key: 'h1', label: 'H1' },
+  { key: 'h2', label: 'H2' },
+  { key: 'h3', label: 'H3' },
+  { key: 'h4', label: 'H4' },
+  { key: 'p1', label: 'P1' },
+  { key: 'p2', label: 'P2' },
+];
+
+const OUTPUT_FIELDS: Array<{ key: keyof NonNullable<JeffStyleSheet['outputs']>; label: string; hint: string }> = [
+  { key: 'presentation',    label: 'Presentation',     hint: 'How every deck (.pptx) should be laid out.' },
+  { key: 'researchPdf',     label: 'Research PDF',     hint: 'Shape for research briefs Jeff produces as PDF.' },
+  { key: 'spreadsheet',     label: 'Spreadsheet',      hint: 'Shape for data pulls, trackers and comparisons (.xlsx).' },
+  { key: 'competitorBrief', label: 'Competitor brief', hint: 'Structure Jeff uses when profiling a competitor.' },
+  { key: 'weeklySummary',   label: 'Weekly summary',   hint: 'What the Monday digest looks like.' },
+  { key: 'dailyNews',       label: 'Daily news',       hint: 'Shape of the payments-news digest.' },
+];
+
+function StyleSheetPanel() {
+  const styleQ = useJeffStyleSheet();
+  const save = useSaveJeffStyleSheet();
+  const uploadLogo = useUploadJeffLogo();
+  const clearLogo = useClearJeffLogo();
+  const existing = styleQ.data?.data ?? null;
+
+  const [draft, setDraft] = useState<JeffStyleSheet | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  // Sync draft from server whenever the row arrives (or after a save round-trip refetches).
+  useEffect(() => {
+    if (existing) setDraft(structuredClone(existing));
+  }, [existing]);
+
+  const d = draft;
+  if (!d) {
+    return (
+      <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>Loading style sheet…</div>
+    );
+  }
+
+  // Narrowed setters — keep the brand/voice/outputs objects well-formed.
+  const setBrand = (patch: Partial<NonNullable<JeffStyleSheet['brand']>>) =>
+    setDraft({ ...d, brand: { ...(d.brand ?? {}), ...patch } });
+  const setTypeScale = (key: keyof JeffTypeScale, val: number | undefined) => {
+    const ts = { ...(d.brand?.typeScale ?? {}), [key]: val };
+    setBrand({ typeScale: ts });
+  };
+  const setVoice = (patch: Partial<NonNullable<JeffStyleSheet['voice']>>) =>
+    setDraft({ ...d, voice: { ...(d.voice ?? {}), ...patch } });
+  const setOutput = (key: string, val: string) =>
+    setDraft({ ...d, outputs: { ...(d.outputs ?? {}), [key]: val } });
+
+  const onSave = async () => {
+    await save.mutateAsync(d);
+    setSavedAt(new Date().toLocaleTimeString());
+  };
+
+  const onLogoUpload = async (variant: 'light' | 'dark', file: File) => {
+    await uploadLogo.mutateAsync({ variant, file });
+  };
+  const onLogoClear = async (variant: 'light' | 'dark') => {
+    await clearLogo.mutateAsync(variant);
+  };
+
+  const brand = d.brand ?? {};
+  const outputs = d.outputs ?? {};
+  const voice = d.voice ?? {};
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 4px 0' }}>Jeff's style sheet</h2>
+        <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>
+          Jeff applies this to every system prompt and every file he produces — brand palette, fonts, type scale, logos, plus a short guide per output format.
+        </div>
+      </div>
+
+      {/* Voice ─────────────────────────────────────── */}
+      <Section title="Voice" hint="How Jeff should sound across chat and written output.">
+        <Field label="Tone">
+          <textarea
+            className="input"
+            rows={2}
+            value={voice.tone ?? ''}
+            onChange={(e) => setVoice({ tone: e.target.value })}
+            placeholder="Concise, warm, direct. No waffle."
+          />
+        </Field>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Avoid" hint="Comma-separated.">
+            <input
+              className="input"
+              value={(voice.avoid ?? []).join(', ')}
+              onChange={(e) => setVoice({ avoid: splitList(e.target.value) })}
+            />
+          </Field>
+          <Field label="Prefer" hint="Comma-separated.">
+            <input
+              className="input"
+              value={(voice.prefer ?? []).join(', ')}
+              onChange={(e) => setVoice({ prefer: splitList(e.target.value) })}
+            />
+          </Field>
+        </div>
+      </Section>
+
+      {/* Brand identity ───────────────────────────── */}
+      <Section title="Brand identity" hint="Name, tagline, colours.">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Brand name">
+            <input className="input" value={brand.name ?? ''} onChange={(e) => setBrand({ name: e.target.value })} />
+          </Field>
+          <Field label="Tagline">
+            <input className="input" value={brand.tagline ?? ''} onChange={(e) => setBrand({ tagline: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {COLOUR_FIELDS.map((c) => (
+            <ColourField
+              key={c.key}
+              label={c.label}
+              value={(brand[c.key] as string | undefined) ?? ''}
+              onChange={(v) => setBrand({ [c.key]: v } as Partial<NonNullable<JeffStyleSheet['brand']>>)}
+            />
+          ))}
+        </div>
+      </Section>
+
+      {/* Typography ─────────────────────────────── */}
+      <Section title="Typography" hint="Font families and the type scale (points) used in generated files.">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Primary font">
+            <input className="input" value={brand.fontPrimary ?? ''} onChange={(e) => setBrand({ fontPrimary: e.target.value })} placeholder="Poppins" />
+          </Field>
+          <Field label="Secondary font">
+            <input className="input" value={brand.fontSecondary ?? brand.fontMono ?? ''} onChange={(e) => setBrand({ fontSecondary: e.target.value })} placeholder="Roboto" />
+          </Field>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+          {TYPE_SCALE_FIELDS.map((t) => (
+            <Field key={t.key} label={t.label}>
+              <input
+                className="input"
+                type="number"
+                min={8}
+                max={120}
+                value={brand.typeScale?.[t.key] ?? ''}
+                onChange={(e) => {
+                  const n = e.target.value === '' ? undefined : Number(e.target.value);
+                  setTypeScale(t.key, Number.isFinite(n) ? n : undefined);
+                }}
+              />
+            </Field>
+          ))}
+        </div>
+      </Section>
+
+      {/* Logos ──────────────────────────────────── */}
+      <Section title="Logos" hint="Used on title slides, PDF covers, and any other branded output.">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <LogoTile
+            label="For light backgrounds"
+            logo={brand.logoLight ?? null}
+            busy={uploadLogo.isPending || clearLogo.isPending}
+            onUpload={(f) => onLogoUpload('light', f)}
+            onClear={() => onLogoClear('light')}
+            background="#fff"
+          />
+          <LogoTile
+            label="For dark backgrounds"
+            logo={brand.logoDark ?? null}
+            busy={uploadLogo.isPending || clearLogo.isPending}
+            onUpload={(f) => onLogoUpload('dark', f)}
+            onClear={() => onLogoClear('dark')}
+            background={brand.colorNeutralDark ?? '#0F171A'}
+          />
+        </div>
+      </Section>
+
+      {/* Output style guides ────────────────────── */}
+      <Section title="Output style guides" hint="Short prose guides Jeff applies when producing each kind of file. Keep to a few lines each.">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {OUTPUT_FIELDS.map((o) => (
+            <Field key={o.key} label={o.label} hint={o.hint}>
+              <textarea
+                className="input"
+                rows={3}
+                value={(outputs[o.key] ?? '') as string}
+                onChange={(e) => setOutput(o.key, e.target.value)}
+              />
+            </Field>
+          ))}
+        </div>
+      </Section>
+
+      {/* Save bar ──────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        position: 'sticky', bottom: 0,
+        padding: '12px 0', borderTop: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
+      }}>
+        <button className="btn btn-primary" onClick={onSave} disabled={save.isPending}>
+          <Icon name="check" size={12} /> {save.isPending ? 'Saving…' : 'Save style sheet'}
+        </button>
+        {savedAt && <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>Saved at {savedAt}</span>}
+        <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)', marginLeft: 'auto' }}>
+          {styleQ.data?.updatedAt
+            ? <>Last server save {styleQ.data.updatedAt}{styleQ.data.updatedBy ? ` · ${styleQ.data.updatedBy}` : ''}</>
+            : 'Not saved yet'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Section(props: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 2px 0' }}>{props.title}</h3>
+        {props.hint && <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>{props.hint}</div>}
+      </div>
+      {props.children}
+    </div>
+  );
+}
+
+function Field(props: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--fg-2)', fontWeight: 500 }}>
+      <span>{props.label}{props.hint && <span style={{ color: 'var(--fg-4)', fontWeight: 400 }}> · {props.hint}</span>}</span>
+      {props.children}
+    </label>
+  );
+}
+
+function ColourField(props: { label: string; value: string; onChange: (hex: string) => void }) {
+  const safe = /^#[0-9a-fA-F]{6}$/.test(props.value) ? props.value : '#000000';
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--fg-2)', fontWeight: 500 }}>
+      <span>{props.label}</span>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        border: '1px solid var(--border-default)', borderRadius: 8,
+        padding: '4px 6px', background: 'var(--bg-surface)',
+      }}>
+        <input
+          type="color"
+          value={safe}
+          onChange={(e) => props.onChange(e.target.value.toUpperCase())}
+          style={{
+            width: 28, height: 28, padding: 0, border: 'none', background: 'transparent',
+            cursor: 'pointer',
+          }}
+        />
+        <input
+          type="text"
+          value={props.value}
+          onChange={(e) => props.onChange(e.target.value)}
+          className="mono"
+          style={{
+            flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent',
+            fontSize: 12, color: 'var(--fg-1)',
+          }}
+        />
+      </div>
+    </label>
+  );
+}
+
+function LogoTile(props: {
+  label: string;
+  logo: JeffLogoRef | null | undefined;
+  busy: boolean;
+  onUpload: (file: File) => void | Promise<void>;
+  onClear: () => void | Promise<void>;
+  background: string;
+}) {
+  const [local, setLocal] = useState<HTMLInputElement | null>(null);
+  return (
+    <div style={{
+      border: '1px solid var(--border-default)', borderRadius: 10,
+      background: 'var(--bg-surface)', overflow: 'hidden',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)', fontSize: 12, color: 'var(--fg-2)', fontWeight: 500 }}>
+        {props.label}
+      </div>
+      <div style={{
+        minHeight: 140, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: props.background, padding: 16,
+      }}>
+        {props.logo ? (
+          <img
+            src={api.agent.styleSheet.logoPreviewUrl(props.logo.fileId)}
+            alt={props.logo.name}
+            style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }}
+          />
+        ) : (
+          <div style={{ fontSize: 12, color: props.background === '#fff' ? '#8a8e95' : '#c7cbd1' }}>No logo yet</div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, padding: 10 }}>
+        <input
+          ref={setLocal}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) props.onUpload(f);
+            e.currentTarget.value = '';
+          }}
+        />
+        <button
+          className="btn btn-ghost"
+          onClick={() => local?.click()}
+          disabled={props.busy}
+        >
+          <Icon name="upload" size={12} /> {props.logo ? 'Replace' : 'Upload'}
+        </button>
+        {props.logo && (
+          <button className="btn btn-ghost" onClick={() => props.onClear()} disabled={props.busy}>
+            <Icon name="trash" size={12} /> Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function splitList(s: string): string[] {
+  return s.split(',').map((x) => x.trim()).filter(Boolean);
+}
+
+const REGION_LABELS: Record<string, string> = {
+  global:  'Global',
+  uk:      'UK / Eire',
+  de:      'Germany',
+  fr:      'France',
+  'es-pt': 'Spain / Portugal',
+  it:      'Italy',
+  benelux: 'Benelux',
+};
+
+const STARTER_LIST_PROMPT = "Suggest 5 platform-payments / PSP competitors for Path we're not yet tracking. Cover a mix of regions — UK/Eire, Germany, France, Spain/Portugal, Italy, Benelux. For each candidate, use web_search to confirm they're real and active, then call add_competitor with a slug id, name, homepage URL, press page / newsroom URL, the right region code, and 3-4 focus-area tags. When you're done, reply with a short list summarising what you added.";
+
+function CompetitorsPanel() {
+  const listQ = useCompetitors();
+  const create = useCreateCompetitor();
+  const patch = usePatchCompetitor();
+  const remove = useDeleteCompetitor();
+  const askJeff = useUI((s) => s.askJeff);
+  const competitors = listQ.data ?? [];
+  const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<JeffCompetitor | null>(null);
+
+  // Group by region so long lists stay scannable. Within each group: enabled first, then by sortOrder.
+  const grouped = competitors.reduce<Record<string, JeffCompetitor[]>>((acc, c) => {
+    const key = c.region ?? 'other';
+    (acc[key] ??= []).push(c);
+    return acc;
+  }, {});
+  const groupKeys = Object.keys(grouped).sort((a, b) => {
+    const order = ['global', 'uk', 'de', 'fr', 'es-pt', 'it', 'benelux', 'other'];
+    return order.indexOf(a) - order.indexOf(b);
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 4px 0' }}>Tracked competitors</h2>
+          <div style={{ fontSize: 12.5, color: 'var(--fg-3)' }}>
+            Drive Jeff's news digest, competitor feature watch, and research refresh. Disable a row to skip it without deleting.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => askJeff(STARTER_LIST_PROMPT)}
+            title="Open the Jeff chat with a prompt that asks him to propose + add competitors using web search"
+          >
+            <Icon name="sparkle" size={14} /> Ask Jeff for suggestions
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowNew(true)}>
+            <Icon name="plus" size={14} /> Add competitor
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+        {competitors.length === 0 && (
+          <div style={{ padding: '36px 20px', textAlign: 'center', color: 'var(--fg-3)' }}>
+            <div style={{ fontSize: 14, color: 'var(--fg-2)', fontWeight: 500, marginBottom: 6 }}>No competitors yet.</div>
+            <div style={{ fontSize: 12.5, marginBottom: 14 }}>Add one by hand, or let Jeff do the research and fill the list.</div>
+            <button className="btn btn-primary" onClick={() => askJeff(STARTER_LIST_PROMPT)}>
+              <Icon name="sparkle" size={13} /> Let Jeff suggest a starter list
+            </button>
+          </div>
+        )}
+        {groupKeys.map((key, gi) => (
+          <div key={key}>
+            {competitors.length > 0 && (
+              <div className="mono" style={{
+                fontSize: 10, padding: '10px 16px 6px', color: 'var(--fg-4)',
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                borderTop: gi === 0 ? 'none' : '1px solid var(--border-subtle)',
+                background: 'var(--bg-sunken)',
+              }}>
+                {REGION_LABELS[key] ?? 'Other'} · {grouped[key].length}
+              </div>
+            )}
+            {grouped[key].map((c, i) => (
+              <CompetitorRow
+                key={c.id}
+                competitor={c}
+                last={i === grouped[key].length - 1 && gi === groupKeys.length - 1}
+                onToggle={() => patch.mutate({ id: c.id, patch: { enabled: !c.enabled } })}
+                onEdit={() => setEditing(c)}
+                onRemove={() => { if (confirm(`Remove ${c.name}? Its tracked features will be deleted too.`)) remove.mutate(c.id); }}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {showNew && <CompetitorDialog onClose={() => setShowNew(false)} onSubmit={async (body) => { await create.mutateAsync(body); setShowNew(false); }} />}
+      {editing && <CompetitorDialog existing={editing} onClose={() => setEditing(null)} onSubmit={async (body) => { await patch.mutateAsync({ id: editing.id, patch: body }); setEditing(null); }} />}
+    </div>
+  );
+}
+
+function CompetitorRow({ competitor: c, last, onToggle, onEdit, onRemove }: {
+  competitor: JeffCompetitor;
+  last: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '150px 1fr 180px 70px 44px',
+      alignItems: 'center',
+      gap: 14,
+      padding: '12px 16px',
+      borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+      opacity: c.enabled ? 1 : 0.55,
+    }}>
+      <span style={{ fontSize: 13, color: 'var(--fg-1)', fontWeight: 500 }}>{c.name}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        {c.homepage
+          ? <a href={c.homepage} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: 'var(--fg-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.homepage}</a>
+          : <i style={{ fontSize: 12, color: 'var(--fg-4)' }}>no homepage</i>}
+        {c.pressPageUrl && (
+          <a href={c.pressPageUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--fg-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            press · {c.pressPageUrl.replace(/^https?:\/\//, '')}
+          </a>
+        )}
+      </div>
+      <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {(c.focusAreas ?? []).slice(0, 4).map((t) => (
+          <span key={t} className="tag" style={{ color: 'var(--fg-3)' }}>#{t}</span>
+        ))}
+      </span>
+      <label onClick={onToggle} style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+        <span style={{
+          width: 32, height: 18, borderRadius: 10,
+          background: c.enabled ? 'var(--path-primary)' : 'var(--border-strong)',
+          position: 'relative', transition: 'background 120ms',
+        }}>
+          <span style={{
+            position: 'absolute', top: 2,
+            left: c.enabled ? 16 : 2,
+            width: 14, height: 14, borderRadius: '50%',
+            background: 'var(--bg-surface)', transition: 'left 120ms',
+          }} />
+        </span>
+      </label>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className="btn btn-subtle btn-icon" title="Edit" onClick={onEdit}><Icon name="pencil" size={12} /></button>
+        <button className="btn btn-subtle btn-icon" title="Remove" onClick={onRemove}><Icon name="trash" size={12} /></button>
+      </div>
+    </div>
+  );
+}
+
+const REGION_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '',        label: '— None —' },
+  { value: 'global',  label: 'Global' },
+  { value: 'uk',      label: 'UK / Eire' },
+  { value: 'de',      label: 'Germany' },
+  { value: 'fr',      label: 'France' },
+  { value: 'es-pt',   label: 'Spain / Portugal' },
+  { value: 'it',      label: 'Italy' },
+  { value: 'benelux', label: 'Benelux' },
+];
+
+function CompetitorDialog({ existing, onClose, onSubmit }: {
+  existing?: JeffCompetitor;
+  onClose: () => void;
+  onSubmit: (body: Omit<JeffCompetitor, 'id'>) => Promise<void>;
+}) {
+  const [name, setName] = useState(existing?.name ?? '');
+  const [homepage, setHomepage] = useState(existing?.homepage ?? '');
+  const [pressPage, setPressPage] = useState(existing?.pressPageUrl ?? '');
+  const [region, setRegion] = useState<string>(existing?.region ?? '');
+  const [focus, setFocus] = useState((existing?.focusAreas ?? []).join(', '));
+  const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [sortOrder, setSortOrder] = useState(existing?.sortOrder ?? 0);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await onSubmit({
+        name: name.trim(),
+        homepage: homepage.trim() || null,
+        pressPageUrl: pressPage.trim() || null,
+        region: (region || null) as JeffCompetitor['region'],
+        notes: notes.trim() || null,
+        focusAreas: focus.split(',').map((s) => s.trim()).filter(Boolean),
+        enabled: existing?.enabled ?? true,
+        sortOrder: Number(sortOrder) || 0,
+      });
+    } catch (err) {
+      alert(`Save failed: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,26,0.55)' }} />
+      <form onSubmit={(e) => { e.preventDefault(); submit(); }}
+        style={{
+          position: 'relative', width: '100%', maxWidth: 480,
+          background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+          borderRadius: 10, padding: 22,
+          display: 'flex', flexDirection: 'column', gap: 12,
+          boxSizing: 'border-box',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0, fontSize: 17, color: 'var(--fg-1)' }}>{existing ? 'Edit competitor' : 'Add competitor'}</h2>
+          <button type="button" onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={13} /></button>
+        </div>
+        <CompField label="Name"><input autoFocus className="input" value={name} onChange={(e) => setName(e.target.value)} /></CompField>
+        <CompField label="Homepage"><input className="input" placeholder="https://..." value={homepage} onChange={(e) => setHomepage(e.target.value)} /></CompField>
+        <CompField label="Press / newsroom URL (used by research-refresh)">
+          <input className="input" placeholder="https://.../newsroom" value={pressPage} onChange={(e) => setPressPage(e.target.value)} />
+        </CompField>
+        <CompField label="Region">
+          <Dropdown<string>
+            value={region}
+            onChange={setRegion}
+            options={REGION_OPTIONS}
+            ariaLabel="Region"
+          />
+        </CompField>
+        <CompField label="Focus areas (comma separated)"><input className="input" placeholder="kyc, boarding, aml" value={focus} onChange={(e) => setFocus(e.target.value)} /></CompField>
+        <CompField label="Notes"><textarea className="input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ resize: 'vertical' }} /></CompField>
+        <CompField label="Sort order"><input className="input" type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value))} /></CompField>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+          <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={busy || !name.trim()}>
+            {busy ? 'Saving…' : existing ? 'Save' : 'Add'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CompField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
       {children}
     </label>
   );

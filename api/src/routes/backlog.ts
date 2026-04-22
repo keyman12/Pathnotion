@@ -6,19 +6,23 @@ export const backlogRouter = Router();
 
 const stageSchema = z.enum(['now', 'next', 'later']);
 
+const attachmentSchema = z.object({
+  type: z.enum(['doc', 'file', 'url']),
+  ref: z.string().min(1),
+  label: z.string().optional(),
+});
+
 const SELECT_BACKLOG = `
   SELECT id,
          title,
          note,
          product_id AS product,
-         subfolder_id AS subfolderId,
          stage,
          owner_key AS owner,
          due_date AS due,
          progress,
          effort_days AS effortDays,
-         link_type AS linkType,
-         link_ref AS linkRef,
+         attachments AS attachmentsJson,
          flag,
          age,
          sort_order AS sortOrder,
@@ -26,11 +30,18 @@ const SELECT_BACKLOG = `
   FROM backlog_items
 `;
 
-type BacklogRowRaw = { linkType: string | null; linkRef: string | null; [k: string]: unknown };
+type BacklogRowRaw = { attachmentsJson: string | null; [k: string]: unknown };
 function mapBacklog(row: BacklogRowRaw | undefined) {
   if (!row) return row;
-  const { linkType, linkRef, ...rest } = row;
-  return { ...rest, link: linkType && linkRef ? { type: linkType, ref: linkRef } : null };
+  const { attachmentsJson, ...rest } = row;
+  let attachments: Array<{ type: string; ref: string; label?: string }> = [];
+  if (attachmentsJson) {
+    try {
+      const parsed = JSON.parse(attachmentsJson);
+      if (Array.isArray(parsed)) attachments = parsed;
+    } catch { /* malformed — treat as empty */ }
+  }
+  return { ...rest, attachments };
 }
 
 backlogRouter.get('/items', (req, res) => {
@@ -87,14 +98,13 @@ const patchSchema = z.object({
   title: z.string().optional(),
   note: z.string().nullish(),
   product: z.string().optional(),
-  subfolderId: z.number().int().nullish(),
   stage: stageSchema.optional(),
   owner: z.enum(['D', 'R']).optional(),
   due: z.string().nullish(),
   flag: z.enum(['overdue', 'due-soon']).nullish(),
   progress: z.number().int().min(0).max(100).optional(),
   effortDays: z.number().min(0).nullish(),
-  link: z.object({ type: z.enum(['doc', 'backlog', 'url']), ref: z.string().min(1) }).nullish(),
+  attachments: z.array(attachmentSchema).nullish(),
   sortOrder: z.number().int().optional(),
   completed: z.boolean().optional(),
 });
@@ -109,7 +119,6 @@ backlogRouter.patch('/items/:id', (req, res) => {
     ['title', 'title = @title'],
     ['note', 'note = @note'],
     ['product', 'product_id = @product'],
-    ['subfolderId', 'subfolder_id = @subfolderId'],
     ['stage', 'stage = @stage'],
     ['owner', 'owner_key = @owner'],
     ['due', 'due_date = @due'],
@@ -127,11 +136,9 @@ backlogRouter.patch('/items/:id', (req, res) => {
   if (parsed.data.completed !== undefined) {
     sets.push(parsed.data.completed ? "completed_at = datetime('now')" : 'completed_at = NULL');
   }
-  if ((parsed.data as any).link !== undefined) {
-    const link = (parsed.data as any).link as { type: string; ref: string } | null;
-    sets.push('link_type = @linkType', 'link_ref = @linkRef');
-    (params as any).linkType = link?.type ?? null;
-    (params as any).linkRef = link?.ref ?? null;
+  if (parsed.data.attachments !== undefined) {
+    sets.push('attachments = @attachments');
+    params.attachments = parsed.data.attachments === null ? null : JSON.stringify(parsed.data.attachments);
   }
   if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
   sets.push("updated_at = datetime('now')");

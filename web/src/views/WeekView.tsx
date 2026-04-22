@@ -3,7 +3,7 @@ import { Icon } from '../components/Icon';
 import { PRODUCT_DOCS } from '../lib/seed';
 import { useUI } from '../lib/store';
 import { useSession } from '../lib/useSession';
-import { useBacklog, useCalendar, useProducts, useTasks } from '../lib/queries';
+import { useBacklog, useCalendar, useJeffMemories, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
 import type { CalendarEvent, Doc, FounderKey } from '../lib/types';
 
 export function WeekView({ now }: { now: Date }) {
@@ -20,8 +20,10 @@ export function WeekView({ now }: { now: Date }) {
   const tasks = tasksQ.data ?? [];
   const events = calQ.data ?? [];
 
-  const nowItems = items.filter((b) => b.stage === 'now');
-  const dueThisWeek = items.filter((b) => b.flag === 'due-soon' || b.flag === 'overdue');
+  // Completed items are hidden from Week — they belong on the Backlog's "Show done" view.
+  const open = items.filter((b) => !b.completedAt);
+  const nowItems = open.filter((b) => b.stage === 'now');
+  const dueThisWeek = open.filter((b) => b.flag === 'due-soon' || b.flag === 'overdue');
   const tasksToday = tasks.filter((t) => !t.done && (t.due === 'today' || t.due === 'tomorrow'));
   const todayEvents = events.filter((e) => e.day === 0).sort((a, b) => a.start - b.start);
   const recentDocs = PRODUCT_DOCS.filter((d) => d.updated.includes('today') || d.updated.includes('yesterday')).slice(0, 3);
@@ -32,8 +34,8 @@ export function WeekView({ now }: { now: Date }) {
     .toUpperCase();
   const weekNo = getWeekNumber(now);
 
-  const overdueCount = items.filter((b) => b.flag === 'overdue').length;
-  const dueCount = items.filter((b) => b.flag === 'due-soon').length;
+  const overdueCount = open.filter((b) => b.flag === 'overdue').length;
+  const dueCount = open.filter((b) => b.flag === 'due-soon').length;
   const dDave = nowItems.filter((i) => i.owner === 'D').length;
   const dRaj = nowItems.filter((i) => i.owner === 'R').length;
   const greetingName = session.data?.displayName ?? 'Dave';
@@ -71,13 +73,13 @@ export function WeekView({ now }: { now: Date }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
           <Section title="Now" actionLabel="Open backlog →" onAction={() => navigate('backlog')}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {nowItems.map((b) => <BacklogRow key={b.id} item={b} />)}
+              {nowItems.map((b) => <BacklogRow key={b.id} item={b} onClick={() => navigate('backlog', b.id)} />)}
             </div>
           </Section>
 
           <Section title="Needs attention" sub="Overdue + due this week">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {dueThisWeek.map((b) => <BacklogRow key={b.id} item={b} />)}
+              {dueThisWeek.map((b) => <BacklogRow key={b.id} item={b} onClick={() => navigate('backlog', b.id)} />)}
             </div>
           </Section>
 
@@ -200,43 +202,55 @@ function DocRow({ doc, products }: { doc: Doc; products: Array<{ id: string; lab
 }
 
 function JeffSummary() {
+  const navigate = useUI((s) => s.navigate);
+  const memQ = useJeffMemories('weekly-summary', 1);
+  const runNow = useRunAgentJob();
+  const latest = memQ.data?.memories?.[0] ?? null;
+
+  const onGenerate = async () => {
+    try { await runNow.mutateAsync('weekly-summary'); }
+    catch (err) { alert(`Jeff couldn't draft the summary: ${(err as Error).message}`); }
+  };
+
   return (
     <div style={{
       border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
       padding: '18px 20px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <Avatar who="A" size={30} />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, marginBottom: 4 }}>
-            Drafted your weekly summary.
+            {latest ? latest.title : 'No weekly summary yet.'}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55 }}>
-            Six backlog changes across Dashboard and Boarding. Two docs updated. One investor email drafted for Raj.{' '}
-            <a style={{ color: 'var(--path-primary)', cursor: 'pointer' }}>Read</a>
+          <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+            {latest
+              ? latest.summary
+              : "Jeff runs this every Monday at 07:00 — or click 'Draft now' to have him produce one right away."}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onGenerate} disabled={runNow.isPending}>
+              <Icon name="sparkle" size={12} /> {runNow.isPending ? 'Drafting…' : latest ? 'Redraft now' : 'Draft now'}
+            </button>
+            <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => navigate('jeff')}>
+              Open Jeff
+            </button>
           </div>
         </div>
-        <span className="meta" style={{ fontSize: 10 }}>07:45</span>
-      </div>
-      <hr className="hr" />
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginTop: 14 }}>
-        <Avatar who="A" size={30} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, marginBottom: 4 }}>
-            Clash proposal — Wednesday.
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55 }}>
-            Notable call (shared) overlaps Ops review (Raj). Proposing Ops → 15:30.
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12 }}>Accept</button>
-            <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }}>Open calendar</button>
-          </div>
-        </div>
-        <span className="meta" style={{ fontSize: 10 }}>07:46</span>
+        {latest && <span className="meta" style={{ fontSize: 10, flexShrink: 0 }}>{formatWeeklyAgo(latest.updatedAt)}</span>}
       </div>
     </div>
   );
+}
+
+function formatWeeklyAgo(iso: string): string {
+  const t = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z').getTime();
+  if (!Number.isFinite(t)) return '';
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 function getWeekNumber(d: Date): number {

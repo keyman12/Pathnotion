@@ -102,6 +102,14 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .row-hover { transition: background 120ms ease; }
 .row-hover:hover { background: var(--bg-hover); }
 
+/* Row-level action button — hidden until the row is hovered or the menu is open.
+   Also keyed to the button's own focus so keyboard users can reach it. */
+.row-actions-btn { opacity: 0; transition: opacity 120ms ease, background 120ms ease; pointer-events: none; }
+.row-hover:hover .row-actions-btn,
+.row-hover:focus-within .row-actions-btn,
+.row-actions-btn--open { opacity: 1; pointer-events: auto; }
+.row-actions-btn:hover { background: var(--bg-active) !important; color: var(--fg-1) !important; }
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -227,6 +235,15 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   outline: none;
 }
 .input:focus { border-color: var(--path-primary); }
+
+/* Textareas with .input need the height rule lifted so `rows` can size them.
+   Padding needs top/bottom because no fixed height forces line alignment. */
+textarea.input {
+  height: auto;
+  min-height: 34px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
 
 /* Native form controls — inherit theme colours so dark mode doesn't show white dropdowns */
 input, textarea, select, button {

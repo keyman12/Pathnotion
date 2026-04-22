@@ -10,7 +10,7 @@ import { useBusinessCategories } from '../lib/queries';
 interface NavLink { route: Route; label: string; icon: IconName; badge?: string; }
 
 const WORKSPACE: NavLink[] = [
-  { route: 'week', label: 'This Week', icon: 'week' },
+  { route: 'week', label: 'Today', icon: 'week' },
   { route: 'backlog', label: 'Backlog', icon: 'backlog' },
   { route: 'docs', label: 'Documentation', icon: 'docs' },
   { route: 'tasks', label: 'Tasks', icon: 'tasks' },

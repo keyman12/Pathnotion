@@ -8,7 +8,7 @@ import { useLogout, useSession } from '../lib/useSession';
 import { useBusinessCategories } from '../lib/queries';
 
 const TITLE: Record<string, string> = {
-  week: 'This Week',
+  week: 'Today',
   backlog: 'Backlog',
   docs: 'Documentation',
   tasks: 'Tasks',

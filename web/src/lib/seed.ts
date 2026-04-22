@@ -50,13 +50,13 @@ export const BACKLOG: BacklogItem[] = [
 ];
 
 export const TASKS: Task[] = [
-  { id: 1, title: 'Send MoU draft to Lloyds partner team', owner: 'R', due: 'today', done: false, link: { type: 'doc', ref: 'Bank partner term sheet' } },
-  { id: 2, title: 'Reply to Notable re. data room access', owner: 'R', due: 'today', done: false, link: null },
-  { id: 3, title: 'Push SDK v1.4 release notes', owner: 'D', due: 'tomorrow', done: false, link: { type: 'backlog', ref: 'PTH-175' } },
-  { id: 4, title: 'Review case mgmt phase 2 scope', owner: 'D', due: 'Fri', done: false, link: { type: 'backlog', ref: 'PTH-151' } },
-  { id: 5, title: 'Collect April expense receipts', owner: 'R', due: 'Fri', done: false, link: null },
-  { id: 6, title: 'Update pricing deck for bank pitch', owner: 'R', due: 'Mon', done: false, link: { type: 'doc', ref: 'Pricing playbook' } },
-  { id: 7, title: 'Confirm emulator fleet at the shelf', owner: 'D', due: '15 Apr', done: true, link: { type: 'backlog', ref: 'PTH-207' } },
+  { id: 1, title: 'Send MoU draft to Lloyds partner team', owner: 'R', due: 'today', done: false, attachments: [{ type: 'doc', ref: 'Bank partner term sheet' }] },
+  { id: 2, title: 'Reply to Notable re. data room access', owner: 'R', due: 'today', done: false },
+  { id: 3, title: 'Push SDK v1.4 release notes', owner: 'D', due: 'tomorrow', done: false, attachments: [{ type: 'backlog', ref: 'PTH-175' }] },
+  { id: 4, title: 'Review case mgmt phase 2 scope', owner: 'D', due: 'Fri', done: false, attachments: [{ type: 'backlog', ref: 'PTH-151' }] },
+  { id: 5, title: 'Collect April expense receipts', owner: 'R', due: 'Fri', done: false },
+  { id: 6, title: 'Update pricing deck for bank pitch', owner: 'R', due: 'Mon', done: false, attachments: [{ type: 'doc', ref: 'Pricing playbook' }] },
+  { id: 7, title: 'Confirm emulator fleet at the shelf', owner: 'D', due: '15 Apr', done: true, attachments: [{ type: 'backlog', ref: 'PTH-207' }] },
 ];
 
 export const EVENTS: CalendarEvent[] = [
@@ -185,9 +185,9 @@ export const AGENT_RUNS: AgentRun[] = [
 ];
 
 export const AGENT_JOBS: AgentJob[] = [
-  { id: 'j1', name: 'Weekly summary', schedule: 'Mon 07:00', enabled: true, lastRun: 'Today · 08:01', description: 'Drafts a summary across all modules and files it to Workspace / Weekly summaries.' },
-  { id: 'j2', name: 'Calendar clash resolver', schedule: 'Every 2h · 09:00–18:00', enabled: true, lastRun: 'Yesterday · 16:22', description: 'Reads both founders\' calendars, proposes reschedules. Never writes without approval.' },
-  { id: 'j3', name: 'Doc sync', schedule: 'On backlog change', enabled: true, lastRun: 'Mon · 07:00', description: 'When a backlog item changes stage or description, drafts edits to linked docs/decks.' },
+  { id: 'j1', name: 'Weekly summary', schedule: 'Mon 07:00', enabled: true, lastRunAt: 'Today · 08:01', description: 'Drafts a summary across all modules and files it to Workspace / Weekly summaries.' },
+  { id: 'j2', name: 'Calendar clash resolver', schedule: 'Every 2h · 09:00–18:00', enabled: true, lastRunAt: 'Yesterday · 16:22', description: 'Reads both founders\' calendars, proposes reschedules. Never writes without approval.' },
+  { id: 'j3', name: 'Doc sync', schedule: 'On backlog change', enabled: true, lastRunAt: 'Mon · 07:00', description: 'When a backlog item changes stage or description, drafts edits to linked docs/decks.' },
   { id: 'j4', name: 'Overnight triage', schedule: 'Daily 06:45', enabled: false, description: 'Triages overnight inbound (PRs, emails, alerts). Off by default.' },
 ];
 

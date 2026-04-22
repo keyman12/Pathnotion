@@ -11,7 +11,7 @@ export function MobileWeekView({ now }: { now: Date }) {
   const todayIdx = Math.min(4, Math.max(0, (now.getDay() + 6) % 7));
   const [dayIdx, setDayIdx] = useState(todayIdx);
   const dayEvents = EVENTS.filter((e) => e.day === dayIdx);
-  const nowItems = BACKLOG.filter((b) => b.stage === 'now');
+  const nowItems = BACKLOG.filter((b) => b.stage === 'now' && !b.completedAt);
 
   return (
     <div className="screen-enter">

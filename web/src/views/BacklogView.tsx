@@ -1,13 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
 import { Dropdown } from '../components/Dropdown';
-import type { BacklogItem, FounderKey, Stage } from '../lib/types';
-import { useBacklog, useCreateBacklog, useCreateSubfolder, useDeleteBacklog, usePatchBacklog, useProducts, useSubfolders } from '../lib/queries';
-import { PRODUCT_DOCS } from '../lib/seed';
+import {
+  AttachIconButton,
+  AttachPickerDrawer,
+  AttachmentChipRow,
+  AttachmentViewerDrawer,
+} from '../components/Attachments';
+import type { Attachment, BacklogItem, FounderKey, Stage } from '../lib/types';
+import { useBacklog, useCreateBacklog, useDeleteBacklog, usePatchBacklog, useProducts } from '../lib/queries';
 import { useSession } from '../lib/useSession';
-import type { Subfolder } from '../lib/api';
+import { useUI } from '../lib/store';
 
 type Layout = 'kanban' | 'lanes' | 'list';
 type OwnerFilter = 'global' | 'mine' | 'raj' | 'flagged';
@@ -22,23 +27,30 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
   const [layout, setLayout] = useState<Layout>('kanban');
   const [tab, setTab] = useState<OwnerFilter>('global');
   const [query, setQuery] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const focusBacklogId = useUI((s) => s.focusBacklogId);
+  const clearBacklogFocus = useUI((s) => s.clearBacklogFocus);
+  const [expandedId, setExpandedId] = useState<string | null>(focusBacklogId);
   const [showNew, setShowNew] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const session = useSession();
   const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
 
+  // When another view (e.g. Week) navigates here with a focus id, expand that item and clear the hint.
+  useEffect(() => {
+    if (focusBacklogId) {
+      setExpandedId(focusBacklogId);
+      clearBacklogFocus();
+    }
+  }, [focusBacklogId, clearBacklogFocus]);
+
   const backlogQ = useBacklog();
   const productsQ = useProducts();
-  const subfoldersQ = useSubfolders();
   const createBacklog = useCreateBacklog();
   const patchBacklog = usePatchBacklog();
   const deleteBacklog = useDeleteBacklog();
-  const createSubfolder = useCreateSubfolder();
 
   const items = backlogQ.data ?? [];
   const products = productsQ.data ?? [];
-  const subfolders = subfoldersQ.data ?? [];
 
   const patch = (id: string, p: Partial<BacklogItem>) => patchBacklog.mutate({ id, patch: p });
   const remove = (id: string) => {
@@ -119,9 +131,9 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
         tabs={tabs ? <BacklogTabs value={tab} onChange={setTab} tabs={tabs} /> : undefined}
       />
 
-      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} subfolders={subfolders} productFilter={productFilter ?? null} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
-      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
-      {layout === 'list' && <BacklogList items={filtered} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} onCreateSubfolder={(pid, name) => createSubfolder.mutateAsync({ productId: pid, name })} />}
+      {layout === 'kanban' && <BacklogKanban items={filtered} products={products} productFilter={productFilter ?? null} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
+      {layout === 'lanes' && <BacklogLanes items={filtered} products={products} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
+      {layout === 'list' && <BacklogList items={filtered} products={products} expandedId={expandedId} onToggle={(id) => setExpandedId((c) => c === id ? null : id)} onPatch={patch} onDelete={remove} />}
 
       {showNew && (
         <NewItemDialog
@@ -169,15 +181,13 @@ type Product = { id: string; label: string; color: string; accent?: string; coun
 interface LayoutProps {
   items: BacklogItem[];
   products: Product[];
-  subfolders: Subfolder[];
   expandedId: string | null;
   onToggle: (id: string) => void;
   onPatch: (id: string, patch: Partial<BacklogItem>) => void;
   onDelete: (id: string) => void;
-  onCreateSubfolder: (productId: string, name: string) => Promise<{ id: number }>;
 }
 
-function BacklogKanban({ items, products, subfolders, productFilter, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps & { productFilter: string | null }) {
+function BacklogKanban({ items, products, productFilter, expandedId, onToggle, onPatch, onDelete }: LayoutProps & { productFilter: string | null }) {
   const prods = productFilter ? products.filter((p) => p.id === productFilter) : products;
   return (
     <div style={{
@@ -199,13 +209,13 @@ function BacklogKanban({ items, products, subfolders, productFilter, expandedId,
         </div>
       ))}
       {prods.map((p) => (
-        <ProductRow key={p.id} product={p} items={items} products={products} subfolders={subfolders} expandedId={expandedId} onToggle={onToggle} onPatch={onPatch} onDelete={onDelete} onCreateSubfolder={onCreateSubfolder} />
+        <ProductRow key={p.id} product={p} items={items} products={products} expandedId={expandedId} onToggle={onToggle} onPatch={onPatch} onDelete={onDelete} />
       ))}
     </div>
   );
 }
 
-function ProductRow({ product, items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: { product: Product } & LayoutProps) {
+function ProductRow({ product, items, products, expandedId, onToggle, onPatch, onDelete }: { product: Product } & LayoutProps) {
   const rowItems = items.filter((i) => i.product === product.id);
   return (
     <>
@@ -232,8 +242,8 @@ function ProductRow({ product, items, products, subfolders, expandedId, onToggle
               ? <div style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--font-mono)', padding: '8px 4px' }}>—</div>
               : cell.map((i) => (
                   expandedId === i.id
-                    ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="compact" />
-                    : <KanbanCell key={i.id} item={i} product={product} subfolders={subfolders} onClick={() => onToggle(i.id)} />
+                    ? <InlineEditor key={i.id} item={i} products={products} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                    : <KanbanCell key={i.id} item={i} product={product} onClick={() => onToggle(i.id)} />
                 ))}
           </div>
         );
@@ -242,9 +252,9 @@ function ProductRow({ product, items, products, subfolders, expandedId, onToggle
   );
 }
 
-function KanbanCell({ item, product, subfolders, onClick }: { item: BacklogItem; product: Product; subfolders: Subfolder[]; onClick: () => void }) {
-  const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
+function KanbanCell({ item, product, onClick }: { item: BacklogItem; product: Product; onClick: () => void }) {
   const isCompleted = !!item.completedAt;
+  const attachmentCount = item.attachments?.length ?? 0;
   const flag = computeFlag(toIsoDate(item.due), isCompleted);
   return (
     <div className="row-hover" onClick={onClick} style={{
@@ -264,15 +274,21 @@ function KanbanCell({ item, product, subfolders, onClick }: { item: BacklogItem;
         {isCompleted && <span className="chip chip-later" style={{ fontSize: 9.5, padding: '1px 6px' }}>Done</span>}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35, textDecoration: isCompleted ? 'line-through' : 'none' }}>{item.title}</div>
-      {sf && <div className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>/ {sf.name}</div>}
-      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        {item.due
-          ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{formatDue(item.due)}</span>
-          : <span />}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+          {item.due && (
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, color: flag === 'overdue' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{formatDue(item.due)}</span>
+          )}
           {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
           {item.effortDays != null && <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-4)' }}>{item.effortDays}d</span>}
           <Avatar who={item.owner} size={18} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {attachmentCount > 0 && (
+            <span className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9.5, color: 'var(--fg-4)' }}>
+              <Icon name="paperclip" size={10} /> {attachmentCount}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -289,7 +305,7 @@ function formatDue(s: string | null | undefined): string {
   return s;
 }
 
-function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps) {
+function BacklogLanes({ items, products, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
       {STAGES.map((s) => {
@@ -305,8 +321,8 @@ function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPat
             </div>
             {col.map((i) => (
               expandedId === i.id
-                ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="compact" />
-                : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} compact />
+                ? <InlineEditor key={i.id} item={i} products={products} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="compact" />
+                : <BacklogRow key={i.id} item={i} products={products} onClick={() => onToggle(i.id)} compact />
             ))}
           </div>
         );
@@ -315,22 +331,22 @@ function BacklogLanes({ items, products, subfolders, expandedId, onToggle, onPat
   );
 }
 
-function BacklogList({ items, products, subfolders, expandedId, onToggle, onPatch, onDelete, onCreateSubfolder }: LayoutProps) {
+function BacklogList({ items, products, expandedId, onToggle, onPatch, onDelete }: LayoutProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {items.map((i) => (
         expandedId === i.id
-          ? <InlineEditor key={i.id} item={i} products={products} subfolders={subfolders} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} onCreateSubfolder={onCreateSubfolder} density="roomy" />
-          : <BacklogRow key={i.id} item={i} products={products} subfolders={subfolders} onClick={() => onToggle(i.id)} />
+          ? <InlineEditor key={i.id} item={i} products={products} onCollapse={() => onToggle(i.id)} onPatch={(patch) => onPatch(i.id, patch)} onDelete={() => onDelete(i.id)} density="roomy" />
+          : <BacklogRow key={i.id} item={i} products={products} onClick={() => onToggle(i.id)} />
       ))}
     </div>
   );
 }
 
-function BacklogRow({ item, products, subfolders, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; subfolders: Subfolder[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
+function BacklogRow({ item, products, onClick, compact, showProduct = true }: { item: BacklogItem; products: Product[]; onClick?: () => void; compact?: boolean; showProduct?: boolean }) {
   const p = products.find((x) => x.id === item.product);
-  const sf = item.subfolderId ? subfolders.find((x) => x.id === item.subfolderId) : null;
   const isCompleted = !!item.completedAt;
+  const attachmentCount = item.attachments?.length ?? 0;
   const flag = computeFlag(toIsoDate(item.due), isCompleted);
   if (!p) return null;
   return (
@@ -354,7 +370,7 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
           {showProduct && (
             <span className="tag" style={{ color: p.color }}>
               <span className="tag-dot" style={{ background: p.color }} />
-              {p.label}{sf ? ` / ${sf.name}` : ''}
+              {p.label}
             </span>
           )}
           {item.due && (
@@ -372,6 +388,11 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {attachmentCount > 0 && (
+          <span className="mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, color: 'var(--fg-4)' }}>
+            <Icon name="paperclip" size={11} /> {attachmentCount}
+          </span>
+        )}
         {(item.progress ?? 0) > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.progress ?? 0}%</span>}
         {isCompleted ? (
           <span className="chip chip-later">Done</span>
@@ -385,18 +406,16 @@ function BacklogRow({ item, products, subfolders, onClick, compact, showProduct 
 }
 
 // Inline editor — replaces the card when expanded. Auto-saves on change.
-function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelete, onCreateSubfolder }: {
+function InlineEditor({ item, products, onCollapse, onPatch, onDelete }: {
   item: BacklogItem;
   products: Product[];
-  subfolders: Subfolder[];
   onCollapse: () => void;
   onPatch: (patch: Partial<BacklogItem>) => void;
   onDelete: () => void;
-  onCreateSubfolder: (productId: string, name: string) => Promise<{ id: number }>;
   density?: 'compact' | 'roomy'; // kept for call-site compatibility; layout is now always the same
 }) {
   const p = products.find((x) => x.id === item.product);
-  const productSubfolders = subfolders.filter((sf) => sf.productId === item.product);
+  const attachments = item.attachments ?? [];
 
   // Local mirrors for text/number inputs so typing isn't interrupted by the patch round-trip — saved on blur.
   const [title, setTitle] = useState(item.title);
@@ -405,8 +424,36 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
   const [progressDraft, setProgressDraft] = useState<string>(String(item.progress ?? 0));
   const [effortDraft, setEffortDraft] = useState<string>(item.effortDays != null ? String(item.effortDays) : '');
 
+  // Attachment UX: one drawer opens the picker (add new), another opens the viewer (click existing chip).
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [viewing, setViewing] = useState<Attachment | null>(null);
+
   const flag = computeFlag(dueIso, !!item.completedAt);
   const isCompleted = !!item.completedAt;
+
+  const addAttachment = (att: Attachment) => {
+    const dup = attachments.some((a) => a.type === att.type && a.ref === att.ref);
+    if (dup) return;
+    onPatch({ attachments: [...attachments, att] });
+  };
+
+  const removeAttachment = (idx: number) => {
+    const next = attachments.filter((_, i) => i !== idx);
+    onPatch({ attachments: next });
+  };
+
+  const openAttachment = (att: Attachment) => {
+    if (att.type === 'url') {
+      window.open(att.ref, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (att.type === 'backlog') {
+      // Jump to the linked backlog item with its editor open.
+      useUI.getState().navigate('backlog', att.ref);
+      return;
+    }
+    setViewing(att);
+  };
 
   return (
     <div style={{
@@ -458,13 +505,21 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
         </FieldLabel>
 
         <FieldLabel label="Description">
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={() => { if (note !== (item.note ?? '')) onPatch({ note: note || null }); }}
-            className="input"
-            style={{ width: '100%', minHeight: 96, padding: '10px 12px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
-            placeholder="What's this about?"
+          <div style={{ position: 'relative' }}>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onBlur={() => { if (note !== (item.note ?? '')) onPatch({ note: note || null }); }}
+              className="input"
+              style={{ width: '100%', minHeight: 96, padding: '10px 40px 10px 12px', fontSize: 13, lineHeight: 1.5, resize: 'vertical' }}
+              placeholder="What's this about?"
+            />
+            <AttachIconButton onClick={() => setPickerOpen(true)} />
+          </div>
+          <AttachmentChipRow
+            attachments={attachments}
+            onOpen={openAttachment}
+            onRemove={(_att, idx) => removeAttachment(idx)}
           />
         </FieldLabel>
 
@@ -553,51 +608,12 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           <FieldLabel label="Product">
             <Dropdown<string>
               value={item.product}
-              onChange={(v) => onPatch({ product: v, subfolderId: null })}
+              onChange={(v) => onPatch({ product: v })}
               options={products.map((pp) => ({ value: pp.id, label: pp.label }))}
               ariaLabel="Product"
             />
           </FieldLabel>
         </div>
-
-        {/* Attach — link to a doc or paste a URL */}
-        <FieldLabel label="Attach">
-          <AttachPicker value={item.link ?? null} onChange={(link) => onPatch({ link })} />
-        </FieldLabel>
-
-        <FieldLabel label="Sub-folder">
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 200px', minWidth: 180, maxWidth: 360 }}>
-              <Dropdown<string | number>
-                value={item.subfolderId ?? ''}
-                onChange={(v) => onPatch({ subfolderId: v === '' ? null : Number(v) })}
-                options={[
-                  { value: '', label: productSubfolders.length ? '— none —' : 'No sub-folders yet' },
-                  ...productSubfolders.map((sf) => ({ value: sf.id, label: sf.name })),
-                ]}
-                disabled={productSubfolders.length === 0}
-                ariaLabel="Sub-folder"
-              />
-            </div>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ padding: '6px 10px', fontSize: 12, flexShrink: 0 }}
-              onClick={async () => {
-                const name = prompt(`New sub-folder under "${p?.label ?? item.product}":`)?.trim();
-                if (!name) return;
-                try {
-                  const created = await onCreateSubfolder(item.product, name);
-                  onPatch({ subfolderId: created.id });
-                } catch (err) {
-                  alert(`Could not create sub-folder: ${(err as Error).message}`);
-                }
-              }}
-            >
-              <Icon name="plus" size={12} /> New
-            </button>
-          </div>
-        </FieldLabel>
 
         <div className="inline-editor-footer" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid var(--border-subtle)', paddingTop: 14, marginTop: 4 }}>
           <button
@@ -621,6 +637,21 @@ function InlineEditor({ item, products, subfolders, onCollapse, onPatch, onDelet
           <span className="mono inline-editor-status" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{item.id} · changes save automatically</span>
         </div>
       </div>
+
+      {pickerOpen && (
+        <AttachPickerDrawer
+          existing={attachments}
+          onAdd={(att) => { addAttachment(att); }}
+          onClose={() => setPickerOpen(false)}
+          includeBacklog={false}
+        />
+      )}
+      {viewing && (
+        <AttachmentViewerDrawer
+          attachment={viewing}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -639,78 +670,6 @@ function FieldLabel({ label, children }: { label: string; children: React.ReactN
       <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
       {children}
     </label>
-  );
-}
-
-function AttachPicker({ value, onChange }: {
-  value: { type: 'doc' | 'backlog' | 'url'; ref: string } | null;
-  onChange: (v: { type: 'doc' | 'backlog' | 'url'; ref: string } | null) => void;
-}) {
-  const [type, setType] = useState<'' | 'doc' | 'backlog' | 'url'>(value?.type ?? '');
-  const [ref, setRef] = useState<string>(value?.ref ?? '');
-
-  const commit = (t: '' | 'doc' | 'backlog' | 'url', r: string) => {
-    if (!t || !r) { if (value) onChange(null); return; }
-    if (t === 'url') {
-      // URL: no commit until blur
-      onChange({ type: t, ref: r });
-    } else {
-      onChange({ type: t, ref: r });
-    }
-  };
-
-  return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ flex: '0 0 160px' }}>
-        <Dropdown<'' | 'doc' | 'url'>
-          value={type === 'backlog' ? '' : type}
-          onChange={(t) => {
-            setType(t);
-            if (!t) { setRef(''); onChange(null); }
-          }}
-          options={[
-            { value: '', label: '— none —' },
-            { value: 'doc', label: 'Document' },
-            { value: 'url', label: 'Link / URL' },
-          ]}
-          ariaLabel="Attach type"
-        />
-      </div>
-      {type === 'doc' && (
-        <div style={{ flex: '1 1 200px', minWidth: 180 }}>
-          <Dropdown<string>
-            value={ref}
-            onChange={(v) => { setRef(v); commit('doc', v); }}
-            options={[
-              { value: '', label: '— pick one —' },
-              ...PRODUCT_DOCS.map((d) => ({ value: d.title, label: d.title })),
-            ]}
-            ariaLabel="Document"
-          />
-        </div>
-      )}
-      {type === 'url' && (
-        <input
-          type="url"
-          value={ref}
-          onChange={(e) => { const v = e.target.value; setRef(v); if (v.trim()) commit('url', v.trim()); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-          placeholder="https://…"
-          className="input"
-          style={{ flex: '1 1 200px', minWidth: 200 }}
-        />
-      )}
-      {value && (
-        <button
-          type="button"
-          className="btn btn-ghost"
-          style={{ padding: '6px 10px', fontSize: 12 }}
-          onClick={() => { setType(''); setRef(''); onChange(null); }}
-        >
-          Clear
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -734,15 +693,6 @@ function computeFlag(dueIso: string, completed: boolean): 'overdue' | 'due-soon'
   if (days < 0) return 'overdue';
   if (days <= 5) return 'due-soon';
   return null;
-}
-
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span className="meta" style={{ fontSize: 9.5 }}>{label}</span>
-      {children}
-    </label>
-  );
 }
 
 function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'due-soon' | null }) {
@@ -820,22 +770,37 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, on
           <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" style={{ width: '100%', height: 32 }} />
         </Row2>
         <Row2 label="Product">
-          <select value={product} onChange={(e) => setProduct(e.target.value)} className="input" style={{ height: 32, padding: '0 8px' }}>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
+          <Dropdown<string>
+            value={product}
+            onChange={setProduct}
+            options={products.map((p) => ({ value: p.id, label: p.label }))}
+            ariaLabel="Product"
+          />
         </Row2>
         <Row2 label="Stage">
-          <select value={stage} onChange={(e) => setStage(e.target.value as Stage)} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
-            <option value="now">Now</option>
-            <option value="next">Next</option>
-            <option value="later">Later</option>
-          </select>
+          <Dropdown<Stage>
+            value={stage}
+            onChange={setStage}
+            options={[
+              { value: 'now',   label: 'Now' },
+              { value: 'next',  label: 'Next' },
+              { value: 'later', label: 'Later' },
+            ]}
+            style={{ width: 140 }}
+            ariaLabel="Stage"
+          />
         </Row2>
         <Row2 label="Owner">
-          <select value={owner} onChange={(e) => setOwner(e.target.value as FounderKey)} className="input" style={{ height: 32, padding: '0 8px', width: 140 }}>
-            <option value="D">Dave</option>
-            <option value="R">Raj</option>
-          </select>
+          <Dropdown<FounderKey>
+            value={owner}
+            onChange={setOwner}
+            options={[
+              { value: 'D', label: 'Dave' },
+              { value: 'R', label: 'Raj' },
+            ]}
+            style={{ width: 140 }}
+            ariaLabel="Owner"
+          />
         </Row2>
         <Row2 label="Due">
           <input value={due} onChange={(e) => setDue(e.target.value)} className="input" style={{ width: 200, height: 32 }} placeholder="e.g. 22 Apr 2026" />

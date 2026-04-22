@@ -60,11 +60,9 @@ const EVENTS = [
   { title: 'CFO — bank call',             day: 4, start: 14,   end: 15,   who: 'R',      kind: 'meet' },
 ];
 
-const JOBS = [
-  { id: 'j1', name: 'Weekly summary',         schedule: 'Mon 07:00',                    enabled: 1, description: 'Drafts a summary across all modules and files it to Workspace / Weekly summaries.' },
-  { id: 'j2', name: 'Calendar clash resolver', schedule: 'Every 2h · 09:00–18:00',      enabled: 1, description: "Reads both founders' calendars, proposes reschedules. Never writes without approval." },
-  { id: 'j3', name: 'Doc sync',               schedule: 'On backlog change',            enabled: 1, description: 'When a backlog item changes stage or description, drafts edits to linked docs/decks.' },
-];
+// Agent jobs now live in the migration in client.ts (scan-memories + weekly-summary).
+// Legacy seed rows (j1/j2/j3) had no `kind` wired up, so the scheduler skipped them anyway.
+const JOBS: Array<{ id: string; name: string; schedule: string; enabled: number; description: string }> = [];
 
 const ACCESS = [
   { module: 'calendar', read: 1, write: 0 },
@@ -78,6 +76,102 @@ const BUSINESS_CATEGORIES = [
   { id: 'sales',   label: 'Sales',   icon: 'trend-up', sort_order: 2 },
   { id: 'legal',   label: 'Legal',   icon: 'scale',    sort_order: 3 },
 ];
+
+type SeedBlock =
+  | { type: 'h1' | 'h2' | 'h3' | 'p' | 'quote'; text: string }
+  | { type: 'ul' | 'ol'; items: string[] }
+  | { type: 'code'; text: string; lang?: string }
+  | { type: 'divider' }
+  | { type: 'callout'; tone: 'info' | 'warn'; text: string };
+
+interface SeedDoc {
+  id: string;
+  title: string;
+  root: 'product' | 'finance' | 'sales' | 'legal';
+  product_id?: string;
+  group_name?: string;
+  size_label: string;
+  tags: string[];
+  by: string;
+  blocks?: SeedBlock[];
+}
+
+const DEFAULT_STUB_BLOCKS: SeedBlock[] = [
+  { type: 'p', text: 'This doc is a stub — start typing to give it shape.' },
+];
+
+const DOCS: SeedDoc[] = [
+  // Product docs
+  { id: 'd1', title: 'Boarding — the Wizard, end-to-end', root: 'product', product_id: 'boarding',  size_label: '22 min', tags: ['spec'], by: 'D', blocks: [
+    { type: 'h1', text: 'Boarding — the Wizard, end-to-end' },
+    { type: 'p', text: 'This is the primary merchant onboarding flow. It covers account creation, KYC collection, bank linking, and plan selection.' },
+    { type: 'callout', tone: 'info', text: 'Every step writes a checkpoint — users can resume where they left off on any device.' },
+    { type: 'h2', text: 'Steps' },
+    { type: 'ol', items: ['Create account', 'Business details', 'KYC', 'Bank link', 'Plan select', 'Review and submit'] },
+    { type: 'h2', text: 'Edge cases' },
+    { type: 'ul', items: ['Soft-declined KYC → retry once with additional docs', 'Partial applications aged 30 days → nudge email', 'Sanctioned country → hard stop with support link'] },
+  ]},
+  { id: 'd2', title: 'MCP — tool surface + scopes',          root: 'product', product_id: 'mcp',       size_label: '14 min', tags: ['rfc'], by: 'D' },
+  { id: 'd3', title: 'V3 firmware OTA design',               root: 'product', product_id: 'emulator',  size_label: '9 min',  tags: ['spec'], by: 'D' },
+  { id: 'd4', title: 'Dashboard — information architecture', root: 'product', product_id: 'dashboard', size_label: '12 min', tags: ['spec', 'IA'], by: 'D', blocks: [
+    { type: 'h1', text: 'Dashboard — information architecture' },
+    { type: 'p', text: 'The dashboard is the anchor surface. Each widget maps to a backlog item, a metric stream, or an embedded report. This doc tracks the chosen IA and the reasoning behind it.' },
+    { type: 'callout', tone: 'info', text: 'Changes here should update the "Pulse" tile copy on the Week view.' },
+    { type: 'h2', text: 'Top-level zones' },
+    { type: 'ul', items: ['Pulse — realtime health strip', 'Focus — active "Now" items', 'Metrics — KPI grid', 'Reports — drillable tables'] },
+    { type: 'h2', text: 'Navigation model' },
+    { type: 'p', text: 'Sidebar is product-led. A product card drills into its own Now / Next / Later.' },
+    { type: 'divider' },
+    { type: 'h3', text: 'Open questions' },
+    { type: 'ol', items: ['Do we surface both founders in the Pulse strip?', "Where does Jeff's proposal surface live — inline or in a tray?"] },
+  ]},
+  { id: 'd5', title: 'Dashboard v2 north-star',              root: 'product', product_id: 'dashboard', size_label: '4 min',  tags: ['vision'], by: 'D' },
+  { id: 'd6', title: 'Partner co-brand guidelines',          root: 'product', product_id: 'boarding',  size_label: '6 min',  tags: ['brand'], by: 'R' },
+
+  // Finance docs
+  { id: 'f1', title: 'Series A operating model — v3', root: 'finance', group_name: 'Models',    size_label: 'sheet', tags: ['model', 'Series A'], by: 'R' },
+  { id: 'f2', title: 'Monthly burn tracker',          root: 'finance', group_name: 'Models',    size_label: 'sheet', tags: ['ops'], by: 'R' },
+  { id: 'f3', title: 'FY26 forecast assumptions',     root: 'finance', group_name: 'Forecasts', size_label: '7 min', tags: ['forecast'], by: 'R' },
+  { id: 'f4', title: 'Bank partner term sheet',       root: 'finance', group_name: 'Legal',     size_label: '11 min', tags: ['term-sheet'], by: 'R', blocks: [
+    { type: 'h1', text: 'Bank partner term sheet' },
+    { type: 'p', text: 'Draft terms with Lloyds partner team. Not yet counter-signed. Comments open.' },
+    { type: 'callout', tone: 'warn', text: 'Do not circulate outside the two founders and legal.' },
+    { type: 'h2', text: 'Commercials' },
+    { type: 'ul', items: ['Revenue share — their ask 30%, our counter 18%', 'Minimum volume — their ask £50M/yr, our counter £20M/yr', 'Exclusivity — their ask UK SME, our counter none in year 1'] },
+    { type: 'h2', text: 'Exit clauses' },
+    { type: 'ul', items: ['Either party 90-day notice', 'Data portability obligation'] },
+  ]},
+  { id: 'f5', title: 'Employment agreements — master', root: 'finance', group_name: 'Contracts', size_label: '14 min', tags: ['template'], by: 'R' },
+  { id: 'f6', title: 'April board deck',              root: 'finance', group_name: 'Board',     size_label: 'deck',  tags: ['board'], by: 'R' },
+
+  // Sales docs
+  { id: 's1', title: 'Q2 pipeline — target accounts', root: 'sales', group_name: 'Pipeline',  size_label: '8 min',  tags: ['pipeline'], by: 'D' },
+  { id: 's2', title: 'Lloyds — account notes',        root: 'sales', group_name: 'Accounts',  size_label: '5 min',  tags: ['bank'], by: 'R' },
+  { id: 's3', title: 'Demo playbook v2',              root: 'sales', group_name: 'Playbooks', size_label: '10 min', tags: ['playbook'], by: 'D' },
+  { id: 's4', title: 'Tiered pricing — rationale',    root: 'sales', group_name: 'Pricing',   size_label: 'sheet',  tags: ['pricing'], by: 'R' },
+
+  // Legal docs
+  { id: 'l1', title: 'Shareholder register',           root: 'legal', group_name: 'Corporate',  size_label: 'sheet', tags: ['corporate'], by: 'R' },
+  { id: 'l2', title: 'FCA — application checklist',    root: 'legal', group_name: 'Compliance', size_label: '6 min', tags: ['FCA'], by: 'R' },
+  { id: 'l3', title: 'NDA — master template',          root: 'legal', group_name: 'Contracts',  size_label: '3 min', tags: ['template'], by: 'R' },
+  { id: 'l4', title: 'Trademarks — filings log',       root: 'legal', group_name: 'IP',         size_label: 'sheet', tags: ['IP'], by: 'R' },
+];
+
+const upsertDoc = db.prepare(`
+  INSERT INTO docs (id, title, root, product_id, group_name, size_label, tags, created_by, updated_by, updated)
+  VALUES (@id, @title, @root, @product_id, @group_name, @size_label, @tags, @by, @by, 'today')
+  ON CONFLICT(id) DO UPDATE SET
+    title = excluded.title,
+    root = excluded.root,
+    product_id = excluded.product_id,
+    group_name = excluded.group_name,
+    size_label = excluded.size_label,
+    tags = excluded.tags,
+    updated_by = excluded.updated_by
+`);
+const deleteBlocks = db.prepare('DELETE FROM doc_blocks WHERE doc_id = ?');
+const insertBlock = db.prepare('INSERT INTO doc_blocks (doc_id, sort_order, type, data) VALUES (?, ?, ?, ?)');
+const countBlocks = db.prepare('SELECT COUNT(*) AS n FROM doc_blocks WHERE doc_id = ?');
 
 const seedPassword = process.env.SEED_PASSWORD ?? 'pathnotion';
 
@@ -184,6 +278,28 @@ const run = db.transaction(() => {
   for (const j of JOBS) upsertJob.run(j);
   for (const a of ACCESS) upsertAccess.run(a);
   for (const c of BUSINESS_CATEGORIES) upsertCategory.run(c);
+
+  for (const d of DOCS) {
+    upsertDoc.run({
+      id: d.id,
+      title: d.title,
+      root: d.root,
+      product_id: d.product_id ?? null,
+      group_name: d.group_name ?? null,
+      size_label: d.size_label,
+      tags: JSON.stringify(d.tags),
+      by: d.by,
+    });
+    // Only seed blocks if this doc has no stored blocks yet — don't stomp on user edits.
+    const existing = (countBlocks.get(d.id) as { n: number }).n;
+    if (existing === 0) {
+      deleteBlocks.run(d.id);
+      const blocks = d.blocks ?? DEFAULT_STUB_BLOCKS;
+      for (const [i, b] of blocks.entries()) {
+        insertBlock.run(d.id, i, b.type, JSON.stringify(b));
+      }
+    }
+  }
 });
 
 run();

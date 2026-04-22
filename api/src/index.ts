@@ -1,4 +1,8 @@
-import 'dotenv/config';
+// Let .env win over the parent shell. Some environments (Claude Code, some CI runners)
+// pre-set ANTHROPIC_API_KEY to an empty string as a safety measure — without `override`
+// dotenv silently leaves those empties in place and Jeff sees "key not set".
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
@@ -12,9 +16,11 @@ import { docsRouter } from './routes/docs.js';
 import { agentRouter } from './routes/agent.js';
 import { productsRouter } from './routes/products.js';
 import { businessCategoriesRouter } from './routes/business-categories.js';
-import { subfoldersRouter } from './routes/subfolders.js';
+import { driveRouter } from './routes/drive.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { startDigestScheduler } from './services/daily-digest.js';
+import { startCalendarSyncScheduler } from './services/calendar-sync.js';
+import { startScheduler as startJeffScheduler } from './services/jeff-scheduler.js';
 
 const app = express();
 
@@ -51,7 +57,7 @@ app.use('/api/calendar', requireAuth, calendarRouter);
 app.use('/api/docs', requireAuth, docsRouter);
 app.use('/api/agent', requireAuth, agentRouter);
 app.use('/api/business-categories', requireAuth, businessCategoriesRouter);
-app.use('/api/subfolders', requireAuth, subfoldersRouter);
+app.use('/api/drive', requireAuth, driveRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -63,4 +69,6 @@ const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {
   console.log(`PathNotion API listening on :${port}`);
   startDigestScheduler();
+  startCalendarSyncScheduler(5);
+  startJeffScheduler();
 });

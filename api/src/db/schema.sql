@@ -26,23 +26,12 @@ CREATE TABLE IF NOT EXISTS products (
   sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
--- Sub-folders per product (e.g. Dashboard/dave)
-CREATE TABLE IF NOT EXISTS subfolders (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id  TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  name        TEXT NOT NULL,
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_subfolders_product ON subfolders(product_id);
-
 -- Backlog items (work tickets)
 CREATE TABLE IF NOT EXISTS backlog_items (
   id            TEXT PRIMARY KEY,                  -- e.g. PTH-204
   title         TEXT NOT NULL,
   note          TEXT,
   product_id    TEXT REFERENCES products(id) ON DELETE SET NULL,
-  subfolder_id  INTEGER REFERENCES subfolders(id) ON DELETE SET NULL,
   stage         TEXT NOT NULL DEFAULT 'now',       -- 'now' | 'next' | 'later'
   owner_key     TEXT NOT NULL,                     -- FK to users.key (not enforced; allows seed D/R)
   due_date      TEXT,                              -- ISO YYYY-MM-DD preferred (legacy free-text tolerated)

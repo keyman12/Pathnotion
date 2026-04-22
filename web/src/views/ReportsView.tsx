@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
+import { Dropdown } from '../components/Dropdown';
 import { useBacklog, useProducts } from '../lib/queries';
 import type { BacklogItem, FounderKey, Stage } from '../lib/types';
 
@@ -197,9 +198,13 @@ function FilterSelect({ label, value, onChange, options }: {
   return (
     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg-3)' }}>
       <span>{label}:</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="input" style={{ height: 30, padding: '0 8px' }}>
-        {options.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-      </select>
+      <Dropdown<string>
+        value={value}
+        onChange={onChange}
+        options={options.map((o) => ({ value: o.v, label: o.l }))}
+        style={{ minWidth: 140 }}
+        ariaLabel={label}
+      />
     </label>
   );
 }

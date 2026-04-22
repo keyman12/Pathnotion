@@ -8,7 +8,14 @@ interface UIState {
   sidebarCollapsed: boolean;
   searchOpen: boolean;
   mobileMenuOpen: boolean;
-  navigate: (r: Route) => void;
+  /** Set when another view wants the Backlog to land with a specific item already expanded. */
+  focusBacklogId: string | null;
+  /** Prefill text for the Jeff chat. Cleared after the chat picks it up. */
+  jeffPrefill: string | null;
+  navigate: (r: Route, focusBacklogId?: string | null) => void;
+  clearBacklogFocus: () => void;
+  askJeff: (prompt: string) => void;
+  clearJeffPrefill: () => void;
   setTheme: (t: 'dark' | 'light') => void;
   setDensity: (d: 'default' | 'airy' | 'dense') => void;
   toggleSidebar: () => void;
@@ -41,10 +48,19 @@ export const useUI = create<UIState>((set) => ({
   sidebarCollapsed: false,
   searchOpen: false,
   mobileMenuOpen: false,
-  navigate: (r) => {
+  focusBacklogId: null,
+  jeffPrefill: null,
+  navigate: (r, focusBacklogId) => {
     try { localStorage.setItem('path:route', r); } catch { /* ignore */ }
-    set({ route: r, searchOpen: false, mobileMenuOpen: false });
+    set({ route: r, searchOpen: false, mobileMenuOpen: false, focusBacklogId: focusBacklogId ?? null });
   },
+  clearBacklogFocus: () => set({ focusBacklogId: null }),
+  /** Jump to Jeff with a prefilled draft. Used by "Ask Jeff" shortcuts from other views. */
+  askJeff: (prompt) => {
+    try { localStorage.setItem('path:route', 'jeff'); } catch { /* ignore */ }
+    set({ route: 'jeff', jeffPrefill: prompt, searchOpen: false, mobileMenuOpen: false });
+  },
+  clearJeffPrefill: () => set({ jeffPrefill: null }),
   setTheme: (t) => {
     try { localStorage.setItem('path:theme', t); } catch { /* ignore */ }
     document.documentElement.dataset.theme = t;
