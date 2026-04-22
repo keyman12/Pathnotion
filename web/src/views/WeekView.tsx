@@ -3,7 +3,8 @@ import { Icon } from '../components/Icon';
 import { PRODUCT_DOCS } from '../lib/seed';
 import { useUI } from '../lib/store';
 import { useSession } from '../lib/useSession';
-import { useBacklog, useCalendar, useJeffMemories, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
+import { useBacklog, useCalendar, useJeffMemories, useJeffTodayFeed, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
+import type { JeffTodayFeedItem } from '../lib/api';
 import type { CalendarEvent, Doc, FounderKey } from '../lib/types';
 
 export function WeekView({ now }: { now: Date }) {
@@ -204,6 +205,7 @@ function DocRow({ doc, products }: { doc: Doc; products: Array<{ id: string; lab
 function JeffSummary() {
   const navigate = useUI((s) => s.navigate);
   const memQ = useJeffMemories('weekly-summary', 1);
+  const feedQ = useJeffTodayFeed();
   const runNow = useRunAgentJob();
   const latest = memQ.data?.memories?.[0] ?? null;
 
@@ -212,32 +214,70 @@ function JeffSummary() {
     catch (err) { alert(`Jeff couldn't draft the summary: ${(err as Error).message}`); }
   };
 
+  const feed = feedQ.data ?? null;
+
   return (
-    <div style={{
-      border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
-      padding: '18px 20px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <Avatar who="A" size={30} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Weekly summary — existing card, unchanged visually. */}
+      <div style={{
+        border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
+        padding: '18px 20px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <Avatar who="A" size={30} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, marginBottom: 4 }}>
+              {latest ? latest.title : 'No weekly summary yet.'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+              {latest
+                ? latest.summary
+                : "Jeff runs this every Monday at 07:00 — or click 'Draft now' to have him produce one right away."}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onGenerate} disabled={runNow.isPending}>
+                <Icon name="sparkle" size={12} /> {runNow.isPending ? 'Drafting…' : latest ? 'Redraft now' : 'Draft now'}
+              </button>
+              <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => navigate('jeff')}>
+                Open Jeff
+              </button>
+            </div>
+          </div>
+          {latest && <span className="meta" style={{ fontSize: 10, flexShrink: 0 }}>{formatWeeklyAgo(latest.updatedAt)}</span>}
+        </div>
+      </div>
+
+      {/* Compact secondary cards — render only when Jeff has actually produced something. */}
+      {feed?.dailyNews && <JeffFeedCard label="Today's news" item={feed.dailyNews} navigateToJeff={() => navigate('jeff')} />}
+      {feed?.competitorFeatures && <JeffFeedCard label="Competitor watch" item={feed.competitorFeatures} navigateToJeff={() => navigate('jeff')} />}
+    </div>
+  );
+}
+
+/** Compact one-liner card used for daily news / competitor watch under the weekly summary.
+ *  Same visual language as the weekly card but smaller and without action buttons. */
+function JeffFeedCard({ label, item, navigateToJeff }: { label: string; item: JeffTodayFeedItem; navigateToJeff: () => void }) {
+  return (
+    <div
+      onClick={navigateToJeff}
+      style={{
+        border: '1px solid var(--border-subtle)', borderRadius: 8, background: 'var(--bg-surface)',
+        padding: '12px 16px', cursor: 'pointer', transition: 'background 0.12s',
+      }}
+      className="row-hover"
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <Avatar who="A" size={22} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, marginBottom: 4 }}>
-            {latest ? latest.title : 'No weekly summary yet.'}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: 'var(--path-primary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--fg-1)', fontWeight: 500 }}>{item.title}</span>
           </div>
-          <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-            {latest
-              ? latest.summary
-              : "Jeff runs this every Monday at 07:00 — or click 'Draft now' to have him produce one right away."}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onGenerate} disabled={runNow.isPending}>
-              <Icon name="sparkle" size={12} /> {runNow.isPending ? 'Drafting…' : latest ? 'Redraft now' : 'Draft now'}
-            </button>
-            <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => navigate('jeff')}>
-              Open Jeff
-            </button>
+          <div style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.45, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {item.summary}
           </div>
         </div>
-        {latest && <span className="meta" style={{ fontSize: 10, flexShrink: 0 }}>{formatWeeklyAgo(latest.updatedAt)}</span>}
+        <span className="meta" style={{ fontSize: 10, flexShrink: 0 }}>{formatWeeklyAgo(item.updatedAt)}</span>
       </div>
     </div>
   );

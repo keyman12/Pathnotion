@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import { db } from '../db/client.js';
 import { decryptToken } from './token-vault.js';
 import { type GoogleTokens } from './google-calendar.js';
-import { ensureJeffFolder, fetchFileContent, uploadFile, walkFiles, type DriveEntry } from './google-drive.js';
+import { ensureJeffFolder, ensureJeffSubfolder, fetchFileContent, uploadFile, walkFiles, type DriveEntry, type JeffDeskKind } from './google-drive.js';
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,14 @@ export function getJobPrompt(jobId: string | null, kind: string): string {
 
 // ─── Memory store ───────────────────────────────────────────────────────────
 
-export type MemoryKind = 'article' | 'drive-file' | 'weekly-summary' | 'note';
+export type MemoryKind =
+  | 'article'              // ingested doc articles
+  | 'drive-file'           // ingested Drive files
+  | 'weekly-summary'       // Monday recap
+  | 'daily-news'           // daily industry sweep
+  | 'competitor-features'  // weekly competitor watch
+  | 'research-refresh'     // research / press page refresh
+  | 'note';                // generic fallback for ad-hoc writes
 
 export interface JeffMemory {
   id: string;
@@ -562,10 +569,17 @@ export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Pr
     tags: ['weekly', 'summary'],
   });
 
-  // Also drop a markdown file into Drive's Jeff folder if we can. Non-fatal if it fails.
+  // Drop a markdown file into Jeff's desk under Digests/ with the standard header.
   let driveFileId: string | null = null;
   try {
-    driveFileId = await saveToJeffFolder(`${title}.md`, text);
+    const doc = buildMarkdownHeader({ title }) + text.trim() + '\n';
+    const saved = await saveToJeffDesk({
+      kind: 'digest',
+      filename: `${title}.md`,
+      content: doc,
+      mimeType: 'text/markdown',
+    });
+    driveFileId = saved?.fileId ?? null;
   } catch (err) {
     console.warn('[jeff] Could not save weekly summary to Drive:', (err as Error).message);
   }
@@ -588,9 +602,16 @@ function firstGoogleTokens(): GoogleTokens | null {
   };
 }
 
-/** Save a markdown file into the workspace's Jeff folder. Auto-creates the folder if missing.
- *  Called by scheduled jobs that produce documents (weekly summary etc.). */
-async function saveToJeffFolder(filename: string, markdown: string): Promise<string | null> {
+/** Save a file onto Jeff's desk in Drive, routing to the right subfolder by kind.
+ *  Digests/, Watch/, Research/ and Generated/ are auto-created under Jeff/ on first use. */
+export async function saveToJeffDesk(opts: {
+  kind: JeffDeskKind;
+  filename: string;
+  content: string | Buffer;
+  mimeType: string;
+  /** Optional extra nesting — e.g. per-competitor folder inside Research. */
+  subPath?: string[];
+}): Promise<{ fileId: string; folderId: string } | null> {
   const cfg = db.prepare('SELECT drive_id, jeff_folder_id FROM workspace_config WHERE id = 1').get() as
     | { drive_id: string | null; jeff_folder_id: string | null }
     | undefined;
@@ -606,21 +627,37 @@ async function saveToJeffFolder(filename: string, markdown: string): Promise<str
     db.prepare("UPDATE workspace_config SET jeff_folder_id = ? WHERE id = 1").run(jeffId);
   }
 
-  const buffer = Buffer.from(markdown, 'utf8');
-  const entry = await uploadFile(tokens, {
-    parentId: jeffId!,
-    name: filename,
-    mimeType: 'text/markdown',
-    data: buffer,
+  const sub = await ensureJeffSubfolder(tokens, {
+    driveId: cfg.drive_id,
+    jeffFolderId: jeffId!,
+    kind: opts.kind,
+    subPath: opts.subPath,
   });
-  // Consume the Readable import to keep TS happy if the SDK changes later.
+
+  const data = typeof opts.content === 'string' ? Buffer.from(opts.content, 'utf8') : opts.content;
+  const entry = await uploadFile(tokens, {
+    parentId: sub.id,
+    name: opts.filename,
+    mimeType: opts.mimeType,
+    data,
+  });
   void Readable;
-  return entry.id;
+  return { fileId: entry.id, folderId: sub.id };
+}
+
+/** Standard header block on every generated .md — title, when, and optional scope line.
+ *  Owners see these in the Docs view (.md previews inline) or in Drive directly. */
+function buildMarkdownHeader(opts: { title: string; scope?: string }): string {
+  const now = new Date();
+  const dateLabel = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const timeLabel = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const scopeLine = opts.scope ? ` · ${opts.scope}` : '';
+  return `# ${opts.title}\n_Jeff, ${dateLabel} ${timeLabel}${scopeLine}_\n\n`;
 }
 
 // ─── Daily news scan ────────────────────────────────────────────────────────
 
-async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ memoryId: string; competitors: number }> {
+async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ memoryId: string; driveFileId: string | null; competitors: number }> {
   const instruction = getJobPrompt(opts.jobId ?? null, 'daily-news');
   // Context append is now opt-in via placeholders so unrelated news jobs (payments industry,
   // regulatory watch) don't get the competitor list forced in. If the prompt references
@@ -632,21 +669,40 @@ async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ mem
     .replaceAll('{competitors}', names)
     .replaceAll('{today}', today);
   const result = await askJeff({ message });
+
+  const title = `Daily news — ${today}`;
   const mem = writeMemory({
-    kind: 'note',
+    kind: 'daily-news',
     sourceId: `daily-news:${today}`,
-    title: `Daily news — ${today}`,
+    title,
     summary: result.text.slice(0, 600),
     tags: ['daily-news'],
   });
-  return { memoryId: mem.id, competitors: competitors.length };
+
+  // Full text to Drive under Digests/ — owners browse these on Jeff's desk.
+  let driveFileId: string | null = null;
+  try {
+    const scope = competitors.length ? `covered: ${names}` : undefined;
+    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    const saved = await saveToJeffDesk({
+      kind: 'digest',
+      filename: `${title}.md`,
+      content: doc,
+      mimeType: 'text/markdown',
+    });
+    driveFileId = saved?.fileId ?? null;
+  } catch (err) {
+    console.warn('[jeff] Could not save daily news to Drive:', (err as Error).message);
+  }
+
+  return { memoryId: mem.id, driveFileId, competitors: competitors.length };
 }
 
 // ─── Competitor feature watch ───────────────────────────────────────────────
 
-async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Promise<{ competitors: number; features: number }> {
+async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Promise<{ competitors: number; features: number; driveFileId: string | null }> {
   const competitors = db.prepare('SELECT id, name, homepage FROM jeff_competitors WHERE enabled = 1 AND homepage IS NOT NULL').all() as Array<{ id: string; name: string; homepage: string }>;
-  if (!competitors.length) return { competitors: 0, features: 0 };
+  if (!competitors.length) return { competitors: 0, features: 0, driveFileId: null };
 
   const beforeCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
   const list = competitors.map((c) => `- id="${c.id}", name="${c.name}", homepage="${c.homepage}"`).join('\n');
@@ -656,17 +712,34 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
   const result = await askJeff({ message, maxSteps: 10 });
   const afterCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
 
-  // Also save the narrative as a memory so the weekly summary can reference it.
+  // Save the narrative as a memory so the weekly summary can reference it.
   const today = new Date().toISOString().slice(0, 10);
+  const title = `Competitor watch — ${today}`;
   writeMemory({
-    kind: 'note',
+    kind: 'competitor-features',
     sourceId: `competitor-features:${today}`,
-    title: `Competitor feature watch — ${today}`,
+    title,
     summary: result.text.slice(0, 600),
     tags: ['competitors', 'features'],
   });
 
-  return { competitors: competitors.length, features: Math.max(0, afterCount - beforeCount) };
+  // And drop the full narrative into Watch/ on Jeff's desk so owners can read it in full.
+  let driveFileId: string | null = null;
+  try {
+    const scope = `covered: ${competitors.map((c) => c.name).join(', ')}`;
+    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    const saved = await saveToJeffDesk({
+      kind: 'watch',
+      filename: `${title}.md`,
+      content: doc,
+      mimeType: 'text/markdown',
+    });
+    driveFileId = saved?.fileId ?? null;
+  } catch (err) {
+    console.warn('[jeff] Could not save competitor watch to Drive:', (err as Error).message);
+  }
+
+  return { competitors: competitors.length, features: Math.max(0, afterCount - beforeCount), driveFileId };
 }
 
 // ─── Research materials refresh ─────────────────────────────────────────────
@@ -692,17 +765,32 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
   const result = await askJeff({ message, maxSteps: rows.length * 2 + 4 });
 
   // Save the narrative as a memory so the Week view / chat can reference today's refresh at a glance.
-  const mem = writeMemory({
-    kind: 'note',
+  const title = `Research refresh — ${today}`;
+  writeMemory({
+    kind: 'research-refresh',
     sourceId: `research-refresh:${today}`,
-    title: `Research refresh — ${today}`,
+    title,
     summary: result.text.slice(0, 600),
     tags: ['research', 'competitors'],
   });
 
+  // Drop the full narrative into Research/ on Jeff's desk. Per-competitor PDF collection is a
+  // later item — for now this gives owners a readable briefing they can open directly.
+  try {
+    const scope = `covered: ${rows.map((r) => r.name).join(', ')}`;
+    const doc = buildMarkdownHeader({ title, scope }) + result.text.trim() + '\n';
+    await saveToJeffDesk({
+      kind: 'research',
+      filename: `${title}.md`,
+      content: doc,
+      mimeType: 'text/markdown',
+    });
+  } catch (err) {
+    console.warn('[jeff] Could not save research refresh to Drive:', (err as Error).message);
+  }
+
   // Count how many save_tracked_feature calls Jeff made this run as a proxy for "useful findings".
   const digested = (result.toolCalls ?? []).filter((c) => c.name === 'save_tracked_feature' && !c.isError).length;
-  void mem;
   return { competitors: rows.length, digested };
 }
 

@@ -65,6 +65,31 @@ agentRouter.get('/status', (_req, res) => {
   res.json({ ...jeffStatus(), memories: countMemories() });
 });
 
+// Today-feed: latest output from each of the three user-facing job kinds. Drives the
+// extra cards under "Jeff · week so far" on the Today view. Returns null for any kind
+// that hasn't produced output yet so the UI can cleanly skip rendering those cards.
+agentRouter.get('/today-feed', (_req, res) => {
+  const latest = (kind: string) => db.prepare(`
+    SELECT id, kind, title, summary, tags, created_at AS createdAt, updated_at AS updatedAt, source_updated_at AS sourceUpdatedAt
+    FROM jeff_memories
+    WHERE kind = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(kind) as any | undefined;
+  const shape = (row: any | undefined) => {
+    if (!row) return null;
+    let tags: string[] = [];
+    try { tags = JSON.parse(row.tags ?? '[]'); } catch { /* ignore */ }
+    return { ...row, tags };
+  };
+  res.json({
+    dailyNews:           shape(latest('daily-news')),
+    weeklySummary:       shape(latest('weekly-summary')),
+    competitorFeatures:  shape(latest('competitor-features')),
+    researchRefresh:     shape(latest('research-refresh')),
+  });
+});
+
 agentRouter.get('/conversations', (_req, res) => {
   const rows = db.prepare(`
     SELECT id, role, text, actions, created_at AS createdAt

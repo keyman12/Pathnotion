@@ -164,6 +164,40 @@ export async function ensureJeffFolder(tokens: GoogleTokens, driveId: string): P
   return ensureFolder(tokens, { driveId, parentId: driveId, name: JEFF_FOLDER_NAME });
 }
 
+/** Map of output "kinds" to their folder name under Jeff/. Any new scheduled job declares
+ *  its kind when it saves a file, and the renderer routes it into the matching subfolder.
+ *  Keeps Jeff's desk tidy as new job types land — you never need a new folder decision. */
+export const JEFF_SUBFOLDERS = {
+  digest:    'Digests',    // periodic recaps (daily, weekly, monthly)
+  watch:     'Watch',      // tracking external sources over time (competitors, regulation)
+  research:  'Research',   // reference material built up per topic
+  generated: 'Generated',  // user-requested one-offs from chat (decks, PDFs, sheets)
+} as const;
+
+export type JeffDeskKind = keyof typeof JEFF_SUBFOLDERS;
+
+/** Ensure a subfolder of Jeff/ exists and return it. Optionally nests further — e.g. per-
+ *  competitor sub-folders under Research. Idempotent; safe to call on every save. */
+export async function ensureJeffSubfolder(
+  tokens: GoogleTokens,
+  opts: { driveId: string; jeffFolderId: string; kind: JeffDeskKind; subPath?: string[] },
+): Promise<DriveEntry> {
+  let current = await ensureFolder(tokens, {
+    driveId: opts.driveId,
+    parentId: opts.jeffFolderId,
+    name: JEFF_SUBFOLDERS[opts.kind],
+  });
+  for (const name of opts.subPath ?? []) {
+    // eslint-disable-next-line no-await-in-loop
+    current = await ensureFolder(tokens, {
+      driveId: opts.driveId,
+      parentId: current.id,
+      name,
+    });
+  }
+  return current;
+}
+
 /** Upload a file into the given Drive folder. Buffer-based — suits the small files our
  *  team will drop from the browser. For big uploads we'd swap this for resumable. */
 export async function uploadFile(

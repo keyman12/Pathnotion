@@ -143,6 +143,9 @@ export function useSyncCalendar() {
 export function useJeffStatus() {
   return useQuery({ queryKey: ['agent', 'status'], queryFn: () => api.agent.status(), staleTime: 30_000 });
 }
+export function useJeffTodayFeed() {
+  return useQuery({ queryKey: ['agent', 'today-feed'], queryFn: () => api.agent.todayFeed(), staleTime: 60_000 });
+}
 export function useJeffConversation() {
   return useQuery({ queryKey: ['agent', 'conversations'], queryFn: () => api.agent.conversations() });
 }

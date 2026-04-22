@@ -7,7 +7,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
-import { listMemories, type JeffMemory } from './jeff.js';
+import { listMemories, saveToJeffDesk, type JeffMemory } from './jeff.js';
 import { decryptToken } from './token-vault.js';
 import { type GoogleTokens } from './google-calendar.js';
 
@@ -439,27 +439,15 @@ register({
     required: ['title', 'body'],
   },
   run: async ({ title, body }) => {
-    const cfg = db.prepare('SELECT drive_id, jeff_folder_id FROM workspace_config WHERE id = 1').get() as
-      | { drive_id: string | null; jeff_folder_id: string | null }
-      | undefined;
-    if (!cfg?.drive_id) return { error: 'No shared drive configured.' };
-    const tokens = firstGoogleTokens();
-    if (!tokens) return { error: 'Google not connected.' };
-    const { ensureJeffFolder, uploadFile } = await import('./google-drive.js');
-    let jeffId = cfg.jeff_folder_id;
-    if (!jeffId) {
-      const f = await ensureJeffFolder(tokens, cfg.drive_id);
-      jeffId = f.id;
-      db.prepare("UPDATE workspace_config SET jeff_folder_id = ? WHERE id = 1").run(jeffId);
-    }
-    const safeName = title.replace(/[^\w \-.]/g, '_');
-    const entry = await uploadFile(tokens, {
-      parentId: jeffId!,
-      name: `${safeName}.md`,
+    const safeName = String(title).replace(/[^\w \-.]/g, '_');
+    const saved = await saveToJeffDesk({
+      kind: 'generated',
+      filename: `${safeName}.md`,
+      content: String(body ?? ''),
       mimeType: 'text/markdown',
-      data: Buffer.from(String(body ?? ''), 'utf8'),
     });
-    return { id: entry.id, name: entry.name, webViewLink: entry.webViewLink };
+    if (!saved) return { error: 'Google not connected or no shared drive configured.' };
+    return { id: saved.fileId };
   },
 });
 
@@ -488,21 +476,9 @@ register({
     required: ['title', 'slides'],
   },
   run: async ({ title, subject, slides }) => {
-    const cfg = db.prepare('SELECT drive_id, jeff_folder_id FROM workspace_config WHERE id = 1').get() as
-      | { drive_id: string | null; jeff_folder_id: string | null } | undefined;
-    if (!cfg?.drive_id) return { error: 'No shared drive configured. Pick one in Settings → Google first.' };
-    const tokens = firstGoogleTokens();
-    if (!tokens) return { error: 'Google not connected.' };
     const safeSlides = Array.isArray(slides) ? slides.filter((s: any) => s && typeof s.heading === 'string') : [];
     if (!safeSlides.length) return { error: 'No slides provided.' };
     const { renderPresentation } = await import('./presentation.js');
-    const { ensureJeffFolder, uploadFile } = await import('./google-drive.js');
-    let jeffId = cfg.jeff_folder_id;
-    if (!jeffId) {
-      const f = await ensureJeffFolder(tokens, cfg.drive_id);
-      jeffId = f.id;
-      db.prepare('UPDATE workspace_config SET jeff_folder_id = ? WHERE id = 1').run(jeffId);
-    }
     const { buffer, filename } = await renderPresentation({
       title:   String(title || 'Untitled deck'),
       subject: subject ? String(subject) : undefined,
@@ -512,16 +488,16 @@ register({
         bullets:  Array.isArray(s.bullets) ? s.bullets.map((b: any) => String(b)) : [],
       })),
     });
-    const entry = await uploadFile(tokens, {
-      parentId: jeffId!,
-      name: filename,
+    const saved = await saveToJeffDesk({
+      kind: 'generated',
+      filename,
+      content: buffer,
       mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      data: buffer,
     });
+    if (!saved) return { error: 'Google not connected or no shared drive configured.' };
     return {
-      id: entry.id,
-      name: entry.name,
-      webViewLink: entry.webViewLink,
+      id: saved.fileId,
+      name: filename,
       slideCount: safeSlides.length + 1,
     };
   },
@@ -566,33 +542,22 @@ register({
     required: ['title', 'blocks'],
   },
   run: async ({ title, subtitle, blocks }) => {
-    const cfg = db.prepare('SELECT drive_id, jeff_folder_id FROM workspace_config WHERE id = 1').get() as
-      | { drive_id: string | null; jeff_folder_id: string | null } | undefined;
-    if (!cfg?.drive_id) return { error: 'No shared drive configured. Pick one in Settings → Google first.' };
-    const tokens = firstGoogleTokens();
-    if (!tokens) return { error: 'Google not connected.' };
     const safeBlocks = Array.isArray(blocks) ? blocks.filter((b: any) => b && typeof b.kind === 'string') : [];
     if (!safeBlocks.length) return { error: 'No blocks provided.' };
     const { renderProductPdf } = await import('./pdf-render.js');
-    const { ensureJeffFolder, uploadFile } = await import('./google-drive.js');
-    let jeffId = cfg.jeff_folder_id;
-    if (!jeffId) {
-      const f = await ensureJeffFolder(tokens, cfg.drive_id);
-      jeffId = f.id;
-      db.prepare('UPDATE workspace_config SET jeff_folder_id = ? WHERE id = 1').run(jeffId);
-    }
     const { buffer, filename } = await renderProductPdf({
       title:    String(title || 'Untitled'),
       subtitle: subtitle ? String(subtitle) : undefined,
       blocks:   safeBlocks as any,
     });
-    const entry = await uploadFile(tokens, {
-      parentId: jeffId!,
-      name: filename,
+    const saved = await saveToJeffDesk({
+      kind: 'generated',
+      filename,
+      content: buffer,
       mimeType: 'application/pdf',
-      data: buffer,
     });
-    return { id: entry.id, name: entry.name, webViewLink: entry.webViewLink, blockCount: safeBlocks.length };
+    if (!saved) return { error: 'Google not connected or no shared drive configured.' };
+    return { id: saved.fileId, name: filename, blockCount: safeBlocks.length };
   },
 });
 
@@ -621,21 +586,9 @@ register({
     required: ['title', 'sheets'],
   },
   run: async ({ title, subtitle, sheets }) => {
-    const cfg = db.prepare('SELECT drive_id, jeff_folder_id FROM workspace_config WHERE id = 1').get() as
-      | { drive_id: string | null; jeff_folder_id: string | null } | undefined;
-    if (!cfg?.drive_id) return { error: 'No shared drive configured. Pick one in Settings → Google first.' };
-    const tokens = firstGoogleTokens();
-    if (!tokens) return { error: 'Google not connected.' };
     const safeSheets = Array.isArray(sheets) ? sheets.filter((s: any) => s && typeof s.name === 'string') : [];
     if (!safeSheets.length) return { error: 'No sheets provided.' };
     const { renderSpreadsheet } = await import('./excel-render.js');
-    const { ensureJeffFolder, uploadFile } = await import('./google-drive.js');
-    let jeffId = cfg.jeff_folder_id;
-    if (!jeffId) {
-      const f = await ensureJeffFolder(tokens, cfg.drive_id);
-      jeffId = f.id;
-      db.prepare('UPDATE workspace_config SET jeff_folder_id = ? WHERE id = 1').run(jeffId);
-    }
     const { buffer, filename } = await renderSpreadsheet({
       title:    String(title || 'Untitled'),
       subtitle: subtitle ? String(subtitle) : undefined,
@@ -645,16 +598,16 @@ register({
         rows:    Array.isArray(s.rows) ? s.rows.map((r: any) => Array.isArray(r) ? r.map((c: any) => String(c ?? '')) : []) : [],
       })),
     });
-    const entry = await uploadFile(tokens, {
-      parentId: jeffId!,
-      name: filename,
+    const saved = await saveToJeffDesk({
+      kind: 'generated',
+      filename,
+      content: buffer,
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      data: buffer,
     });
+    if (!saved) return { error: 'Google not connected or no shared drive configured.' };
     return {
-      id: entry.id,
-      name: entry.name,
-      webViewLink: entry.webViewLink,
+      id: saved.fileId,
+      name: filename,
       sheetCount: safeSheets.length,
     };
   },

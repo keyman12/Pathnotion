@@ -139,6 +139,7 @@ export const api = {
   },
   agent: {
     status: () => fetchJson<JeffStatus>('/agent/status'),
+    todayFeed: () => fetchJson<JeffTodayFeed>('/agent/today-feed'),
     conversations: () => fetchJson<AgentConversationMessage[]>('/agent/conversations'),
     clearConversations: () => fetchJson<{ removed: number }>('/agent/conversations', { method: 'DELETE' }),
     sendMessage: (text: string) =>
@@ -319,7 +320,7 @@ export interface JeffStatus {
 
 export interface JeffMemory {
   id: string;
-  kind: 'article' | 'drive-file' | 'weekly-summary' | 'note';
+  kind: 'article' | 'drive-file' | 'weekly-summary' | 'daily-news' | 'competitor-features' | 'research-refresh' | 'note';
   sourceId: string | null;
   title: string;
   summary: string;
@@ -328,6 +329,23 @@ export interface JeffMemory {
   sourceUpdatedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface JeffTodayFeedItem {
+  id: string;
+  kind: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JeffTodayFeed {
+  dailyNews:          JeffTodayFeedItem | null;
+  weeklySummary:      JeffTodayFeedItem | null;
+  competitorFeatures: JeffTodayFeedItem | null;
+  researchRefresh:    JeffTodayFeedItem | null;
 }
 
 export interface JeffMemoriesResponse {
