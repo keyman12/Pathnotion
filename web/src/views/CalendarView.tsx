@@ -226,6 +226,7 @@ export function CalendarView() {
           weekStart={weekStart}
           onEventClick={setSelected}
           onCreate={(body) => createEvt.mutate(body)}
+          onDayClick={(dayIdx) => { setAnchor(addDays(weekStart, dayIdx)); setMode('day'); }}
           me={me}
         />
       )}
@@ -269,12 +270,14 @@ function snapHour(h: number): number {
   return Math.round(h * 4) / 4;
 }
 
-function WeekGrid({ events, days, weekStart, onEventClick, onCreate, me }: {
+function WeekGrid({ events, days, weekStart, onEventClick, onCreate, onDayClick, me }: {
   events: CalendarEvent[];
   days: { i: number; label: string; date: string; isToday: boolean }[];
   weekStart: Date;
   onEventClick: (e: CalendarEvent) => void;
   onCreate: (body: Omit<CalendarEvent, 'id'>) => void;
+  /** Drill into the day view for the column whose header was clicked. */
+  onDayClick?: (dayIdx: number) => void;
   me: FounderKey;
 }) {
   const now = new Date();
@@ -323,11 +326,25 @@ function WeekGrid({ events, days, weekStart, onEventClick, onCreate, me }: {
 
   return (
     <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
-      {/* day header row */}
+      {/* day header row — click any day to drill into day view for that column */}
       <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(5, 1fr)', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
         <div />
         {days.map((d) => (
-          <div key={d.i} style={{ padding: '12px 16px', borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <div
+            key={d.i}
+            onClick={() => onDayClick?.(d.i)}
+            title="Open this day"
+            className="row-hover"
+            style={{
+              padding: '12px 16px',
+              borderLeft: '1px solid var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 8,
+              cursor: onDayClick ? 'pointer' : 'default',
+              userSelect: 'none',
+            }}
+          >
             <span className="meta" style={{ fontSize: 10 }}>{d.label}</span>
             <span style={{ fontSize: 18, fontWeight: 500, color: d.isToday ? 'var(--path-primary)' : 'var(--fg-1)' }}>{d.date}</span>
           </div>
@@ -418,7 +435,7 @@ function WeekGrid({ events, days, weekStart, onEventClick, onCreate, me }: {
                 slot={pending}
                 me={me}
                 onCancel={() => setPending(null)}
-                onCreate={(title, who, kind) => {
+                onCreate={(title, who, kind, description) => {
                   onCreate({
                     title,
                     who,
@@ -428,6 +445,7 @@ function WeekGrid({ events, days, weekStart, onEventClick, onCreate, me }: {
                     end: pending.end,
                     startIso: hourToIso(weekStart, pending.day, pending.start),
                     endIso: hourToIso(weekStart, pending.day, pending.end),
+                    description: description || null,
                   });
                   setPending(null);
                 }}
@@ -465,14 +483,15 @@ function NewEventQuickPopover({ slot, me, onCancel, onCreate }: {
   slot: { day: number; start: number; end: number };
   me: FounderKey;
   onCancel: () => void;
-  onCreate: (title: string, who: 'D' | 'R' | 'SHARED', kind: 'meet' | 'shared' | 'deep' | 'personal') => void;
+  onCreate: (title: string, who: 'D' | 'R' | 'SHARED', kind: 'meet' | 'shared' | 'deep' | 'personal', description: string) => void;
 }) {
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [who, setWho] = useState<'D' | 'R' | 'SHARED'>(me);
 
   const submit = () => {
     if (!title.trim()) return;
-    onCreate(title.trim(), who, 'meet');
+    onCreate(title.trim(), who, 'meet', description.trim());
   };
 
   return (
@@ -503,10 +522,22 @@ function NewEventQuickPopover({ slot, me, onCancel, onCreate }: {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); submit(); }
+          if (e.key === 'Enter' && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
           else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
         }}
-        style={{ width: '100%', height: 30, marginBottom: 8 }}
+        style={{ width: '100%', height: 30, marginBottom: 6 }}
+      />
+      <textarea
+        className="input"
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
+        }}
+        rows={2}
+        style={{ width: '100%', resize: 'vertical', fontSize: 11.5, lineHeight: 1.4, marginBottom: 8, minHeight: 40, boxSizing: 'border-box' }}
       />
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {(['D', 'R', 'SHARED'] as const).map((k) => (
