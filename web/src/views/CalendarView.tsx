@@ -252,6 +252,7 @@ export function CalendarView() {
       {showNew && (
         <NewEventDialog
           me={me}
+          initialDate={anchor}
           onClose={() => setShowNew(false)}
           onCreate={(body) => createEvt.mutate(body, { onSuccess: () => setShowNew(false) })}
         />
@@ -606,17 +607,21 @@ function fmt(h: number): string {
   return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
 }
 
-function NewEventDialog({ me, onClose, onCreate }: {
+function NewEventDialog({ me, initialDate, onClose, onCreate }: {
   me: FounderKey;
+  /** Pre-fills the date — passed as the currently anchored day so "+ New event" after
+   *  clicking a day in month/week view opens on that day. Falls back to today. */
+  initialDate?: Date;
   onClose: () => void;
   onCreate: (body: Omit<CalendarEvent, 'id'>) => void;
 }) {
-  // Default to today, 10:00 → 11:00, in the user's local timezone.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  // Default to the anchored day (or today), 10:00 → 11:00, in the user's local timezone.
+  const defaultDate = initialDate ?? new Date();
+  const defaultDateIso = `${defaultDate.getFullYear()}-${String(defaultDate.getMonth() + 1).padStart(2, '0')}-${String(defaultDate.getDate()).padStart(2, '0')}`;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [who, setWho] = useState<'D' | 'R' | 'SHARED'>(me);
-  const [date, setDate] = useState(todayIso);
+  const [date, setDate] = useState(defaultDateIso);
   const [start, setStart] = useState('10:00');
   const [end, setEnd] = useState('11:00');
 
