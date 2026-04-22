@@ -31,12 +31,12 @@ export interface SendParams {
   html: string;
 }
 
-export async function sendMail(params: SendParams): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function sendMail(params: SendParams): Promise<{ ok: true; messageId?: string; response?: string } | { ok: false; reason: string }> {
   const t = getMailer();
   if (!t) return { ok: false, reason: 'SMTP not configured' };
   const authUser = process.env.SMTP_USER!;
   try {
-    await t.sendMail({
+    const info = await t.sendMail({
       from: fromAddress(),
       // Envelope-from must match the authenticated user for most SMTP servers (incl. Fasthosts)
       envelope: { from: authUser, to: [params.to] },
@@ -45,8 +45,15 @@ export async function sendMail(params: SendParams): Promise<{ ok: true } | { ok:
       text: params.text,
       html: params.html,
     });
-    return { ok: true };
+    // Log enough to chase a missing email later — subject, recipient, message-id the SMTP
+    // server assigned, and its literal response line (usually '250 2.0.0 OK <id>').
+    console.log(
+      `[mailer] sent to=${params.to} subject="${params.subject.slice(0, 60)}" ` +
+      `messageId=${info.messageId ?? '?'} response="${(info.response ?? '').replace(/\s+/g, ' ').slice(0, 200)}"`,
+    );
+    return { ok: true, messageId: info.messageId, response: info.response };
   } catch (err: any) {
+    console.error(`[mailer] FAILED to=${params.to} subject="${params.subject.slice(0, 60)}" reason=${err?.response ?? err?.message}`);
     return { ok: false, reason: err?.response || err?.message || 'Send failed' };
   }
 }
