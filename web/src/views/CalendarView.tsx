@@ -55,13 +55,38 @@ function friendlyWeekLabel(weekStart: Date): string {
     : `${fmt(weekStart, true)} – ${fmt(end, true)} ${end.getFullYear()}`;
 }
 
+function friendlyDayLabel(d: Date): string {
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function friendlyMonthLabel(d: Date): string {
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+function startOfMonth(d: Date): Date {
+  const out = new Date(d);
+  out.setDate(1);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function addMonths(d: Date, n: number): Date {
+  const out = new Date(d);
+  out.setMonth(out.getMonth() + n);
+  return out;
+}
+
 export function CalendarView() {
   const [mode, setMode] = useState<'day' | 'week' | 'month'>('week');
   const [showD, setShowD] = useState(true);
   const [showR, setShowR] = useState(true);
   const [showNew, setShowNew] = useState(false);
   const [selected, setSelected] = useState<CalendarEvent | null>(null);
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  // Single anchor date that every view derives from. Stays put when you switch modes so the
+  // navigation feels continuous — click through a week, toggle to month, you land on that month.
+  const [anchor, setAnchor] = useState<Date>(() => new Date());
+  const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
+  const monthStart = useMemo(() => startOfMonth(anchor), [anchor]);
 
   const calQ = useCalendar();
   const createEvt = useCreateEvent();
@@ -106,7 +131,27 @@ export function CalendarView() {
     });
   }, [weekStart]);
 
-  const thisWeekIsCurrent = isSameDate(weekStart, startOfWeek(new Date()));
+  // All events for day/month views — not slot-placed, just with original ISO + who + title.
+  const filteredAll = useMemo(() => all.filter((e) => {
+    if (e.who === 'SHARED') return true;
+    if (e.who === 'D' && showD) return true;
+    if (e.who === 'R' && showR) return true;
+    return false;
+  }), [all, showD, showR]);
+
+  const isToday = mode === 'day' ? isSameDate(anchor, new Date())
+    : mode === 'week' ? isSameDate(weekStart, startOfWeek(new Date()))
+    : isSameDate(monthStart, startOfMonth(new Date()));
+
+  const shiftAnchor = (delta: number) => {
+    if (mode === 'day')   return setAnchor((a) => addDays(a, delta));
+    if (mode === 'week')  return setAnchor((a) => addDays(a, 7 * delta));
+    return setAnchor((a) => addMonths(a, delta));
+  };
+
+  const rangeLabel = mode === 'day' ? friendlyDayLabel(anchor)
+    : mode === 'week' ? friendlyWeekLabel(weekStart)
+    : friendlyMonthLabel(monthStart);
 
   const syncLabel = sync.isPending ? 'Syncing…'
     : googleStatus.data?.lastSyncAt
@@ -117,16 +162,16 @@ export function CalendarView() {
     <div className="screen-enter">
       <PageHeader
         title="Calendar"
-        sub={<>{friendlyWeekLabel(weekStart)}. Your events in green, Raj's in blue.</>}
+        sub={<>{rangeLabel}. Your events in green, Raj's in blue.</>}
         right={<>
           <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 6, background: 'var(--bg-surface)', overflow: 'hidden' }}>
-            <button className="btn btn-ghost" style={{ padding: '6px 10px', borderRadius: 0 }} onClick={() => setWeekStart((w) => addDays(w, -7))} title="Previous week">
+            <button className="btn btn-ghost" style={{ padding: '6px 10px', borderRadius: 0 }} onClick={() => shiftAnchor(-1)} title={mode === 'day' ? 'Previous day' : mode === 'week' ? 'Previous week' : 'Previous month'}>
               <Icon name="chevron-left" size={13} />
             </button>
-            <button className="btn btn-ghost" style={{ padding: '6px 12px', borderRadius: 0, opacity: thisWeekIsCurrent ? 0.5 : 1 }} disabled={thisWeekIsCurrent} onClick={() => setWeekStart(startOfWeek(new Date()))}>
+            <button className="btn btn-ghost" style={{ padding: '6px 12px', borderRadius: 0, opacity: isToday ? 0.5 : 1 }} disabled={isToday} onClick={() => setAnchor(new Date())}>
               Today
             </button>
-            <button className="btn btn-ghost" style={{ padding: '6px 10px', borderRadius: 0 }} onClick={() => setWeekStart((w) => addDays(w, 7))} title="Next week">
+            <button className="btn btn-ghost" style={{ padding: '6px 10px', borderRadius: 0 }} onClick={() => shiftAnchor(1)} title={mode === 'day' ? 'Next day' : mode === 'week' ? 'Next week' : 'Next month'}>
               <Icon name="chevron-right" size={13} />
             </button>
           </div>
@@ -184,10 +229,20 @@ export function CalendarView() {
           me={me}
         />
       )}
-      {mode !== 'week' && (
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 28, textAlign: 'center', color: 'var(--fg-3)' }}>
-          <div style={{ fontSize: 13 }}>{mode === 'day' ? 'Day view — single column of events.' : 'Month view — collapsed density.'} (Coming next.)</div>
-        </div>
+      {mode === 'day' && (
+        <DayGrid
+          date={anchor}
+          events={filteredAll}
+          onEventClick={setSelected}
+        />
+      )}
+      {mode === 'month' && (
+        <MonthGrid
+          monthStart={monthStart}
+          events={filteredAll}
+          onEventClick={setSelected}
+          onDayClick={(d) => { setAnchor(d); setMode('day'); }}
+        />
       )}
 
       {showNew && (
@@ -683,6 +738,231 @@ function EventDetail({ event, onClose, onDelete }: { event: CalendarEvent; onClo
             <Icon name="close" size={12} /> Delete
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Day grid ────────────────────────────────────────────────────────────────
+// One tall column of the selected day's hours. Same 7am–7pm band and hour-row height as the
+// week grid, same event styling. No drag-to-create yet — kept read-only for v1 so the user can
+// immediately start reviewing their day; creating new events still works from the + button above.
+
+function DayGrid({ date, events, onEventClick }: {
+  date: Date;
+  events: CalendarEvent[];
+  onEventClick: (e: CalendarEvent) => void;
+}) {
+  const now = new Date();
+  const nowHour = now.getHours() + now.getMinutes() / 60;
+  const isToday = isSameDate(date, new Date());
+
+  const dayEvents = useMemo(() => events.filter((e) => {
+    if (!e.startIso) return false;
+    const d = new Date(e.startIso);
+    return isSameDate(d, date);
+  }).map((e) => ({
+    ...e,
+    start: hourOf(e.startIso!),
+    end:   hourOf(e.endIso ?? e.startIso!),
+  })).sort((a, b) => a.start - b.start), [events, date]);
+
+  return (
+    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
+        <div />
+        <div style={{ padding: '12px 16px', borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span className="meta" style={{ fontSize: 10 }}>{date.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}</span>
+          <span style={{ fontSize: 20, fontWeight: 500, color: isToday ? 'var(--path-primary)' : 'var(--fg-1)' }}>
+            {date.getDate()}
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+            {date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+          </span>
+        </div>
+      </div>
+      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '60px 1fr' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {HOURS.map((h) => (
+            <div key={h} style={{ height: HOUR_H, padding: '4px 8px', borderTop: '1px solid var(--border-subtle)', textAlign: 'right' }}>
+              <span className="meta" style={{ fontSize: 9 }}>{String(h).padStart(2, '0')}:00</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ position: 'relative', borderLeft: '1px solid var(--border-subtle)' }}>
+          {HOURS.map((h) => (
+            <div key={h} style={{ height: HOUR_H, borderTop: '1px solid var(--border-subtle)' }} />
+          ))}
+          {dayEvents.map((e, idx) => {
+            const top = (e.start - START_Y) * HOUR_H;
+            const height = Math.max(16, (e.end - e.start) * HOUR_H - 4);
+            const style = EVT_STYLE[(e.who as 'D' | 'R' | 'SHARED')] ?? EVT_STYLE.SHARED;
+            return (
+              <div
+                key={idx}
+                onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
+                style={{
+                  position: 'absolute',
+                  top: top + 1,
+                  height,
+                  left: 4,
+                  right: 4,
+                  background: style.bg,
+                  color: style.fg,
+                  border: `1px solid ${style.border}`,
+                  borderLeft: `3px solid ${style.border}`,
+                  borderRadius: 5,
+                  padding: '6px 10px',
+                  fontFamily: 'var(--font-primary)',
+                  fontSize: 12.5,
+                  lineHeight: 1.35,
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                  boxShadow: e.flag === 'clash' ? '0 0 0 2px rgba(255,82,82,0.4)' : 'none',
+                }}
+              >
+                <div style={{ fontWeight: 500, color: style.fg }}>{e.title}</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, opacity: 0.8 }}>
+                  {fmt(e.start)}–{fmt(e.end)}{e.location ? ` · ${e.location}` : ''}
+                </div>
+              </div>
+            );
+          })}
+          {isToday && nowHour >= START_Y && nowHour <= START_Y + HOURS.length && (
+            <div style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: (nowHour - START_Y) * HOUR_H,
+              borderTop: '2px solid var(--danger-fg)',
+              zIndex: 2,
+              pointerEvents: 'none',
+            }}>
+              <div style={{ position: 'absolute', left: -4, top: -5, width: 8, height: 8, borderRadius: '50%', background: 'var(--danger-fg)' }} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Month grid ──────────────────────────────────────────────────────────────
+// Classic 7-col × 6-row month. Each cell shows the day number and up to three compact event
+// pills; overflow collapses into "+N more". Clicking a day drills into the day view; clicking
+// a pill opens the event detail dialog. Days outside the current month fade back.
+
+function MonthGrid({ monthStart, events, onEventClick, onDayClick }: {
+  monthStart: Date;
+  events: CalendarEvent[];
+  onEventClick: (e: CalendarEvent) => void;
+  onDayClick: (d: Date) => void;
+}) {
+  const cells = useMemo(() => {
+    const gridStart = startOfWeek(monthStart);         // Mon of the week containing day 1
+    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  }, [monthStart]);
+
+  const byDay = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const e of events) {
+      if (!e.startIso) continue;
+      const d = new Date(e.startIso);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const list = map.get(key) ?? [];
+      list.push(e);
+      map.set(key, list);
+    }
+    for (const list of map.values()) list.sort((a, b) => (hourOf(a.startIso!)) - (hourOf(b.startIso!)));
+    return map;
+  }, [events]);
+
+  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const today = new Date();
+  const currentMonth = monthStart.getMonth();
+
+  return (
+    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
+        {weekdays.map((w) => (
+          <div key={w} className="meta" style={{ fontSize: 10, padding: '10px 14px', borderLeft: '1px solid var(--border-subtle)' }}>
+            {w.toUpperCase()}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: 'minmax(110px, 1fr)' }}>
+        {cells.map((d) => {
+          const inMonth = d.getMonth() === currentMonth;
+          const isToday = isSameDate(d, today);
+          const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+          const dayEvents = byDay.get(key) ?? [];
+          const shown = dayEvents.slice(0, 3);
+          const overflow = dayEvents.length - shown.length;
+          return (
+            <div
+              key={d.toISOString()}
+              onClick={() => onDayClick(d)}
+              className="row-hover"
+              style={{
+                borderTop: '1px solid var(--border-subtle)',
+                borderLeft: '1px solid var(--border-subtle)',
+                padding: 6,
+                background: inMonth ? 'var(--bg-surface)' : 'var(--bg-sunken)',
+                color: inMonth ? 'var(--fg-1)' : 'var(--fg-4)',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                minHeight: 110,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: isToday ? 600 : 400,
+                  color: isToday ? 'var(--path-primary)' : (inMonth ? 'var(--fg-1)' : 'var(--fg-4)'),
+                  width: 22, height: 22,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '50%',
+                  background: isToday ? 'var(--path-primary-tint)' : 'transparent',
+                }}>
+                  {d.getDate()}
+                </span>
+              </div>
+              {shown.map((e, i) => {
+                const style = EVT_STYLE[(e.who as 'D' | 'R' | 'SHARED')] ?? EVT_STYLE.SHARED;
+                const h = hourOf(e.startIso!);
+                return (
+                  <div
+                    key={i}
+                    onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}
+                    style={{
+                      fontSize: 10.5,
+                      padding: '2px 6px',
+                      borderRadius: 3,
+                      background: style.bg,
+                      color: style.fg,
+                      borderLeft: `3px solid ${style.border}`,
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
+                      cursor: 'pointer',
+                    }}
+                    title={`${e.title} · ${fmt(h)}`}
+                  >
+                    <span className="mono" style={{ opacity: 0.75, marginRight: 4 }}>{fmt(h)}</span>
+                    {e.title}
+                  </div>
+                );
+              })}
+              {overflow > 0 && (
+                <div className="meta" style={{ fontSize: 10, color: 'var(--fg-3)', paddingLeft: 4 }}>
+                  + {overflow} more
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
