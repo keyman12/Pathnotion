@@ -1,0 +1,19 @@
+[Unit]
+Description=PathNotion (Node/Express API + built web bundle)
+After=network.target
+
+[Service]
+Type=simple
+User=pathdev
+Group=pathdev
+WorkingDirectory=/opt/path/pathnotion
+EnvironmentFile=/opt/path/pathnotion/.env
+Environment=NODE_ENV=production
+ExecStart=/home/pathdev/.nvm/versions/node/v20.20.2/bin/node api/dist/index.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
