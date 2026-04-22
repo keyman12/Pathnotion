@@ -800,7 +800,7 @@ function DayGrid({ date, events, onEventClick }: {
   // Cap the column width so a single day doesn't stretch across a huge display. The week
   // view needs the full grid because it's five columns, but one column looks silly at 2k+.
   return (
-    <div style={{ maxWidth: 780, margin: '0 auto', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ maxWidth: 780, background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
         <div />
         <div style={{ padding: '12px 16px', borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'baseline', gap: 10 }}>
