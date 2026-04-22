@@ -41,8 +41,11 @@ npm --workspace api run build
 echo "→ build web"
 npm --workspace web run build
 
-# ── Restart the service (systemd first, pm2 second — use whichever is set up)
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q "^$SERVICE_NAME.service"; then
+# ── Restart the service ──────────────────────────────────────────────────────
+# systemd first, pm2 second. If the service user doesn't have sudo, we skip the
+# restart and print the command for a human — building + pulling is still done.
+restart_note=""
+if command -v systemctl >/dev/null 2>&1 && sudo -n true 2>/dev/null && systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME.service"; then
   echo "→ systemctl restart $SERVICE_NAME"
   sudo systemctl restart "$SERVICE_NAME"
   sudo systemctl status "$SERVICE_NAME" --no-pager | head -8
@@ -51,10 +54,15 @@ elif command -v pm2 >/dev/null 2>&1 && pm2 describe "$SERVICE_NAME" >/dev/null 2
   pm2 restart "$SERVICE_NAME"
   pm2 save
 else
-  echo "✗ No process manager found. Set up systemd or PM2 first (see deploy/README.md)."
-  exit 1
+  restart_note="Build done. Restart the service to pick up the new code:
+    sudo systemctl restart $SERVICE_NAME    # (systemd hosts)
+    pm2 restart $SERVICE_NAME                # (pm2 hosts)"
 fi
 
 echo ""
 echo "✓ Deploy complete."
+if [ -n "$restart_note" ]; then
+  echo ""
+  echo "$restart_note"
+fi
 echo "  Health:  curl -s http://127.0.0.1:\${PORT:-4000}/api/health"
