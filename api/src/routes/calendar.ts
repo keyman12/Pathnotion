@@ -273,6 +273,10 @@ const patchSchema = z.object({
   start: z.number().optional(),
   end: z.number().optional(),
   flag: z.string().nullish(),
+  location: z.string().nullish(),
+  description: z.string().nullish(),
+  startIso: z.string().nullish(),
+  endIso: z.string().nullish(),
 });
 
 calendarRouter.patch('/events/:id', (req, res) => {
@@ -288,6 +292,10 @@ calendarRouter.patch('/events/:id', (req, res) => {
     start: 'start_hour = @start',
     end: 'end_hour = @end',
     flag: 'flag = @flag',
+    location: 'location = @location',
+    description: 'description = @description',
+    startIso: 'start_iso = @startIso',
+    endIso: 'end_iso = @endIso',
   };
   for (const [k, sql] of Object.entries(map)) {
     const v = (parsed.data as any)[k];

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Icon } from '../components/Icon';
 import type { CalendarEvent, FounderKey } from '../lib/types';
-import { useCalendar, useCreateEvent, useDeleteEvent, useGoogleCalendarStatus, useSyncCalendar } from '../lib/queries';
+import { useCalendar, useCreateEvent, useDeleteEvent, useGoogleCalendarStatus, usePatchEvent, useSyncCalendar } from '../lib/queries';
 import { useSession } from '../lib/useSession';
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 7); // 7–19
@@ -90,6 +90,7 @@ export function CalendarView() {
 
   const calQ = useCalendar();
   const createEvt = useCreateEvent();
+  const patchEvt = usePatchEvent();
   const deleteEvt = useDeleteEvent();
   const sync = useSyncCalendar();
   const googleStatus = useGoogleCalendarStatus();
@@ -224,9 +225,10 @@ export function CalendarView() {
           events={events}
           days={days}
           weekStart={weekStart}
+          anchor={anchor}
           onEventClick={setSelected}
           onCreate={(body) => createEvt.mutate(body)}
-          onDayClick={(dayIdx) => { setAnchor(addDays(weekStart, dayIdx)); setMode('day'); }}
+          onDayClick={(dayIdx) => setAnchor(addDays(weekStart, dayIdx))}
           me={me}
         />
       )}
@@ -240,9 +242,10 @@ export function CalendarView() {
       {mode === 'month' && (
         <MonthGrid
           monthStart={monthStart}
+          anchor={anchor}
           events={filteredAll}
           onEventClick={setSelected}
-          onDayClick={(d) => { setAnchor(d); setMode('day'); }}
+          onDayClick={(d) => setAnchor(d)}
         />
       )}
 
@@ -259,6 +262,13 @@ export function CalendarView() {
           event={selected}
           onClose={() => setSelected(null)}
           onDelete={() => { if (typeof selected.id === 'number') { deleteEvt.mutate(selected.id); setSelected(null); } }}
+          onSave={(patch) => {
+            if (typeof selected.id !== 'number') return;
+            patchEvt.mutate({ id: selected.id, patch }, {
+              onSuccess: () => setSelected({ ...selected, ...patch }),
+            });
+          }}
+          saving={patchEvt.isPending}
         />
       )}
     </div>
@@ -270,16 +280,20 @@ function snapHour(h: number): number {
   return Math.round(h * 4) / 4;
 }
 
-function WeekGrid({ events, days, weekStart, onEventClick, onCreate, onDayClick, me }: {
+function WeekGrid({ events, days, weekStart, anchor, onEventClick, onCreate, onDayClick, me }: {
   events: CalendarEvent[];
   days: { i: number; label: string; date: string; isToday: boolean }[];
   weekStart: Date;
+  anchor: Date;
   onEventClick: (e: CalendarEvent) => void;
   onCreate: (body: Omit<CalendarEvent, 'id'>) => void;
-  /** Drill into the day view for the column whose header was clicked. */
+  /** Highlight this day column (and anchor it) when the user clicks the header. */
   onDayClick?: (dayIdx: number) => void;
   me: FounderKey;
 }) {
+  const anchorIdx = days.findIndex((d) =>
+    isSameDate(addDays(weekStart, d.i), anchor),
+  );
   const now = new Date();
   const nowHour = now.getHours() + now.getMinutes() / 60;
   const todayIdx = days.findIndex((d) => d.isToday);
@@ -326,29 +340,34 @@ function WeekGrid({ events, days, weekStart, onEventClick, onCreate, onDayClick,
 
   return (
     <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
-      {/* day header row — click any day to drill into day view for that column */}
+      {/* Day header row — click to highlight/anchor a day. Switch to Day view from the mode toggle. */}
       <div style={{ display: 'grid', gridTemplateColumns: '60px repeat(5, 1fr)', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
         <div />
-        {days.map((d) => (
-          <div
-            key={d.i}
-            onClick={() => onDayClick?.(d.i)}
-            title="Open this day"
-            className="row-hover"
-            style={{
-              padding: '12px 16px',
-              borderLeft: '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: 8,
-              cursor: onDayClick ? 'pointer' : 'default',
-              userSelect: 'none',
-            }}
-          >
-            <span className="meta" style={{ fontSize: 10 }}>{d.label}</span>
-            <span style={{ fontSize: 18, fontWeight: 500, color: d.isToday ? 'var(--path-primary)' : 'var(--fg-1)' }}>{d.date}</span>
-          </div>
-        ))}
+        {days.map((d) => {
+          const isAnchor = d.i === anchorIdx;
+          return (
+            <div
+              key={d.i}
+              onClick={() => onDayClick?.(d.i)}
+              title="Highlight this day. Use the Day button to open it."
+              className="row-hover"
+              style={{
+                padding: '12px 16px',
+                borderLeft: '1px solid var(--border-subtle)',
+                borderBottom: isAnchor ? '2px solid var(--path-primary)' : '2px solid transparent',
+                background: isAnchor ? 'var(--path-primary-tint)' : 'transparent',
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 8,
+                cursor: onDayClick ? 'pointer' : 'default',
+                userSelect: 'none',
+              }}
+            >
+              <span className="meta" style={{ fontSize: 10 }}>{d.label}</span>
+              <span style={{ fontSize: 18, fontWeight: 500, color: d.isToday ? 'var(--path-primary)' : 'var(--fg-1)' }}>{d.date}</span>
+            </div>
+          );
+        })}
       </div>
       {/* grid */}
       <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '60px repeat(5, 1fr)' }}>
@@ -750,14 +769,83 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function EventDetail({ event, onClose, onDelete }: { event: CalendarEvent; onClose: () => void; onDelete: () => void }) {
+function EventDetail({ event, onClose, onDelete, onSave, saving }: {
+  event: CalendarEvent;
+  onClose: () => void;
+  onDelete: () => void;
+  onSave: (patch: Partial<CalendarEvent>) => void;
+  saving?: boolean;
+}) {
   const dayLabel = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][event.day] ?? '';
+  const [editing, setEditing] = useState(false);
+
+  // Edit-state mirrors the event fields. Populated on entering edit mode.
+  const [title, setTitle] = useState(event.title);
+  const [description, setDescription] = useState(event.description ?? '');
+  const [location, setLocation] = useState(event.location ?? '');
+  const [who, setWho] = useState<'D' | 'R' | 'SHARED'>(event.who as 'D' | 'R' | 'SHARED');
+  const [kind, setKind] = useState<'shared' | 'meet' | 'deep' | 'personal'>((event.kind as any) ?? 'meet');
+  const [startTime, setStartTime] = useState(fmt(event.start));
+  const [endTime, setEndTime] = useState(fmt(event.end));
+
+  const beginEdit = () => {
+    setTitle(event.title);
+    setDescription(event.description ?? '');
+    setLocation(event.location ?? '');
+    setWho(event.who as 'D' | 'R' | 'SHARED');
+    setKind((event.kind as any) ?? 'meet');
+    setStartTime(fmt(event.start));
+    setEndTime(fmt(event.end));
+    setEditing(true);
+  };
+  const cancel = () => setEditing(false);
+
+  const save = () => {
+    const toHours = (s: string) => {
+      const [h, m] = s.split(':').map((x) => parseInt(x, 10) || 0);
+      return h + m / 60;
+    };
+    const newStart = toHours(startTime);
+    const newEnd = toHours(endTime);
+    // Rebuild the ISO strings by keeping the event's existing date and swapping in the new
+    // time — otherwise the event stays anchored to its old time in any calendar that reads
+    // ISO (Google sync, future two-way push, external viewers).
+    const patch: Partial<CalendarEvent> = {
+      title: title.trim(),
+      description: description.trim() || null,
+      location: location.trim() || null,
+      who,
+      kind,
+      start: newStart,
+      end: newEnd,
+    };
+    if (event.startIso) {
+      const d = new Date(event.startIso);
+      const sh = Math.floor(newStart);
+      const sm = Math.round((newStart - sh) * 60);
+      d.setHours(sh, sm, 0, 0);
+      patch.startIso = d.toISOString();
+    }
+    if (event.endIso || event.startIso) {
+      const d = new Date(event.endIso || event.startIso!);
+      const eh = Math.floor(newEnd);
+      const em = Math.round((newEnd - eh) * 60);
+      d.setHours(eh, em, 0, 0);
+      patch.endIso = d.toISOString();
+    }
+    onSave(patch);
+    setEditing(false);
+  };
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,26,0.55)' }} />
       <div style={{
         position: 'relative',
-        width: 360,
+        width: 400,
+        maxWidth: 'calc(100vw - 32px)',
+        maxHeight: '90vh',
+        overflow: 'auto',
         background: 'var(--bg-surface)',
         border: '1px solid var(--border-subtle)',
         borderRadius: 10,
@@ -766,22 +854,48 @@ function EventDetail({ event, onClose, onDelete }: { event: CalendarEvent; onClo
         flexDirection: 'column',
         gap: 14,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ margin: 0, fontSize: 18, color: 'var(--fg-1)' }}>{event.title}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          {editing ? (
+            <input
+              autoFocus
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              style={{ flex: 1, height: 36, fontSize: 16, fontWeight: 500 }}
+            />
+          ) : (
+            <h2 style={{ margin: 0, fontSize: 18, color: 'var(--fg-1)' }}>{event.title}</h2>
+          )}
           <button onClick={onClose} className="btn btn-subtle btn-icon"><Icon name="close" size={14} /></button>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
-          {dayLabel} · {fmt(event.start)}–{fmt(event.end)}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>
-          {event.who === 'SHARED' ? 'Shared' : event.who === 'D' ? 'Dave' : 'Raj'} · {event.kind ?? 'meet'}
-        </div>
-        {event.location && (
-          <div style={{ fontSize: 12.5, color: 'var(--fg-2)', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <Icon name="pin" size={11} /> {event.location}
+
+        {editing ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10 }}>
+            <Field label="Start">
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="input" style={{ width: '100%', height: 34, fontFamily: 'var(--font-mono)' }} />
+            </Field>
+            <Field label="End">
+              <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="input" style={{ width: '100%', height: 34, fontFamily: 'var(--font-mono)' }} />
+            </Field>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: 'var(--fg-2)' }}>
+            {dayLabel} · {fmt(event.start)}–{fmt(event.end)}
           </div>
         )}
-        {event.description && (
+
+        {editing ? (
+          <Field label="Description">
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="input"
+              rows={3}
+              placeholder="Agenda, links, context…"
+              style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 60 }}
+            />
+          </Field>
+        ) : (event.description ? (
           <div style={{
             fontSize: 12.5, color: 'var(--fg-2)',
             lineHeight: 1.5, whiteSpace: 'pre-wrap',
@@ -792,12 +906,97 @@ function EventDetail({ event, onClose, onDelete }: { event: CalendarEvent; onClo
           }}>
             {event.description}
           </div>
+        ) : null)}
+
+        {editing ? (
+          <Field label="Location">
+            <input
+              className="input"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="Room, link, address"
+              style={{ width: '100%', height: 34 }}
+            />
+          </Field>
+        ) : (event.location && (
+          <div style={{ fontSize: 12.5, color: 'var(--fg-2)', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Icon name="pin" size={11} /> {event.location}
+          </div>
+        ))}
+
+        {editing ? (
+          <>
+            <Field label="Owner">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
+                {(['D', 'R', 'SHARED'] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setWho(k)}
+                    style={{
+                      padding: '7px 4px',
+                      border: '1px solid ' + (who === k ? 'var(--path-primary)' : 'var(--border-subtle)'),
+                      borderRadius: 6,
+                      background: who === k ? 'var(--path-primary-tint)' : 'transparent',
+                      color: 'var(--fg-1)',
+                      fontSize: 12.5,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {k === 'SHARED' ? 'Shared' : k === 'D' ? 'Dave' : 'Raj'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Field label="Kind">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
+                {(['meet', 'shared', 'deep', 'personal'] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setKind(k)}
+                    style={{
+                      padding: '6px 4px',
+                      border: '1px solid ' + (kind === k ? 'var(--path-primary)' : 'var(--border-subtle)'),
+                      borderRadius: 6,
+                      background: kind === k ? 'var(--path-primary-tint)' : 'transparent',
+                      color: 'var(--fg-1)',
+                      fontSize: 11.5,
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>
+            {event.who === 'SHARED' ? 'Shared' : event.who === 'D' ? 'Dave' : 'Raj'} · {event.kind ?? 'meet'}
+          </div>
         )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-          <button className="btn btn-subtle" style={{ color: 'var(--danger-fg)' }} onClick={() => { if (confirm('Delete this event?')) onDelete(); }}>
-            <Icon name="close" size={12} /> Delete
-          </button>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+          {editing ? (
+            <>
+              <button className="btn btn-ghost" onClick={cancel} disabled={saving}>Cancel</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving || !title.trim()}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-ghost" onClick={onClose}>Close</button>
+              <button className="btn btn-subtle" style={{ color: 'var(--danger-fg)' }} onClick={() => { if (confirm('Delete this event?')) onDelete(); }}>
+                <Icon name="close" size={12} /> Delete
+              </button>
+              <button className="btn btn-primary" onClick={beginEdit}>
+                <Icon name="pencil" size={12} /> Edit
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -915,8 +1114,9 @@ function DayGrid({ date, events, onEventClick }: {
 // pills; overflow collapses into "+N more". Clicking a day drills into the day view; clicking
 // a pill opens the event detail dialog. Days outside the current month fade back.
 
-function MonthGrid({ monthStart, events, onEventClick, onDayClick }: {
+function MonthGrid({ monthStart, anchor, events, onEventClick, onDayClick }: {
   monthStart: Date;
+  anchor: Date;
   events: CalendarEvent[];
   onEventClick: (e: CalendarEvent) => void;
   onDayClick: (d: Date) => void;
@@ -957,6 +1157,7 @@ function MonthGrid({ monthStart, events, onEventClick, onDayClick }: {
         {cells.map((d) => {
           const inMonth = d.getMonth() === currentMonth;
           const isToday = isSameDate(d, today);
+          const isAnchor = isSameDate(d, anchor);
           const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
           const dayEvents = byDay.get(key) ?? [];
           const shown = dayEvents.slice(0, 3);
@@ -966,17 +1167,19 @@ function MonthGrid({ monthStart, events, onEventClick, onDayClick }: {
               key={d.toISOString()}
               onClick={() => onDayClick(d)}
               className="row-hover"
+              title="Highlight this day. Use the Day button to open it."
               style={{
                 borderTop: '1px solid var(--border-subtle)',
                 borderLeft: '1px solid var(--border-subtle)',
                 padding: 6,
-                background: inMonth ? 'var(--bg-surface)' : 'var(--bg-sunken)',
+                background: isAnchor ? 'var(--path-primary-tint)' : (inMonth ? 'var(--bg-surface)' : 'var(--bg-sunken)'),
                 color: inMonth ? 'var(--fg-1)' : 'var(--fg-4)',
                 cursor: 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 4,
                 minHeight: 110,
+                boxShadow: isAnchor ? 'inset 0 -2px 0 var(--path-primary)' : 'none',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
