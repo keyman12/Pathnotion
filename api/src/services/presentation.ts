@@ -5,7 +5,6 @@
 // pptxgenjs ships both CJS and ESM entry points. Different runtimes (tsx, node, bundlers) resolve
 // the default export differently — one gives you the class, the other gives you a namespace. Using
 // dynamic import inside the function + the `.default ?? module` pattern sidesteps the whole mess.
-import type PptxGenJSType from 'pptxgenjs';
 import { db } from '../db/client.js';
 import { decryptToken } from './token-vault.js';
 import { type GoogleTokens } from './google-calendar.js';
@@ -93,7 +92,7 @@ export async function renderPresentation(input: PresentationInput): Promise<Rend
   ]);
 
   const mod: any = await import('pptxgenjs');
-  const PptxGenJS: typeof PptxGenJSType = mod.default?.default ?? mod.default ?? mod;
+  const PptxGenJS: any = mod.default?.default ?? mod.default ?? mod;
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_WIDE';                 // 13.333 × 7.5 inches
   pres.author  = input.author || brand.name || 'Path';

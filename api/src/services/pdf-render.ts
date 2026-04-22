@@ -153,10 +153,13 @@ export async function renderProductPdf(input: ProductPdfInput): Promise<Rendered
       .restore();
     if (logoBuffer) {
       try {
+        // pdfkit's image() positions from the given (x, y) — the alignment options here are
+        // only used when the image is smaller than `fit`. 'center' is the sensible default for
+        // both axes so the logo sits nicely inside the reserved slot.
         doc.image(logoBuffer, pageW - 48 * MM, 7 * MM, {
           fit: [38 * MM, 16 * MM],
-          align: 'right',
-          valign: 'top',
+          align: 'center',
+          valign: 'center',
         });
       } catch { /* non-fatal */ }
     }
@@ -338,7 +341,7 @@ export async function renderProductPdf(input: ProductPdfInput): Promise<Rendered
     const maxH = 72 * MM;
     ensureSpaceFor(maxH / MM + (caption ? 8 : 3));
     try {
-      doc.image(imgBuffer, margin, doc.y, { fit: [maxW, maxH], align: 'left' });
+      doc.image(imgBuffer, margin, doc.y, { fit: [maxW, maxH] });
       // pdfkit doesn't expose the rendered height cleanly when using `fit`. Advance by maxH
       // and rely on ensureSpaceFor above; slightly conservative but safe.
       doc.y += maxH;
