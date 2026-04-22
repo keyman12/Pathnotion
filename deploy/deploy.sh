@@ -35,6 +35,10 @@ git reset --hard origin/main
 echo "→ npm ci (root + workspaces)"
 npm ci
 
+# tsc + vite together can blow the default V8 old-space (~512MB) on small instances
+# like the EC2 t3.micro. 1.5GB is ample for our build and harmless on bigger boxes.
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+
 echo "→ build api"
 npm --workspace api run build
 
@@ -50,8 +54,8 @@ if command -v systemctl >/dev/null 2>&1 && systemctl cat "$SERVICE_NAME.service"
   echo "→ systemctl restart $SERVICE_NAME"
   sudo -n systemctl status "$SERVICE_NAME" --no-pager 2>/dev/null | head -8 || true
 elif command -v pm2 >/dev/null 2>&1 && pm2 describe "$SERVICE_NAME" >/dev/null 2>&1; then
-  echo "→ pm2 restart $SERVICE_NAME"
-  pm2 restart "$SERVICE_NAME"
+  echo "→ pm2 restart $SERVICE_NAME --update-env"
+  pm2 restart "$SERVICE_NAME" --update-env
   pm2 save
 else
   restart_note="Build done. Restart the service to pick up the new code:
