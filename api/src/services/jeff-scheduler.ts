@@ -82,6 +82,25 @@ function setNextRun(jobId: string, schedule: string | null): string {
   return next;
 }
 
+// Live job tracker — one entry per currently-running job. Lets the API expose "what's
+// running right now" to the UI and gives `cancelJob` something to abort.
+const inflight = new Map<string, { controller: AbortController; startedAt: string }>();
+
+/** Snapshot of running jobs — surfaced to the UI so the Run button can show a spinner
+ *  even after a page refresh. */
+export function listRunningJobs(): Array<{ jobId: string; startedAt: string }> {
+  return Array.from(inflight.entries()).map(([jobId, v]) => ({ jobId, startedAt: v.startedAt }));
+}
+
+/** Cancel a running job. Aborts the in-flight Anthropic request via AbortSignal — the
+ *  promise rejects with an AbortError which we catch and log as a normal error run. */
+export function cancelJob(jobId: string): boolean {
+  const entry = inflight.get(jobId);
+  if (!entry) return false;
+  entry.controller.abort('user-cancelled');
+  return true;
+}
+
 /** Execute a single job. Returns the run summary. Caller handles logging. */
 export async function runJobNow(jobId: string): Promise<{ status: 'ok' | 'error'; summary: string }> {
   const row = db.prepare('SELECT * FROM agent_jobs WHERE id = ?').get(jobId) as JobRow | undefined;
@@ -90,19 +109,27 @@ export async function runJobNow(jobId: string): Promise<{ status: 'ok' | 'error'
     writeRun(row.id, 'error', 'No job kind wired up — skipping.', 0);
     return { status: 'error', summary: 'no kind' };
   }
+  if (inflight.has(jobId)) {
+    return { status: 'error', summary: 'already running' };
+  }
+  const controller = new AbortController();
+  inflight.set(jobId, { controller, startedAt: new Date().toISOString() });
   try {
-    const result = await runJob(row.kind as JobKind, row.id);
+    const result = await runJob(row.kind as JobKind, row.id, controller.signal);
     writeRun(row.id, 'ok', result.summary, result.changes);
     db.prepare("UPDATE agent_jobs SET last_run_at = datetime('now') WHERE id = ?").run(row.id);
     setNextRun(row.id, row.schedule ?? null);
     return { status: 'ok', summary: result.summary };
   } catch (err) {
-    const msg = (err as Error).message;
+    const aborted = controller.signal.aborted;
+    const msg = aborted ? 'Cancelled by user.' : (err as Error).message;
     writeRun(row.id, 'error', msg, 0);
     db.prepare("UPDATE agent_jobs SET last_run_at = datetime('now') WHERE id = ?").run(row.id);
     setNextRun(row.id, row.schedule ?? null);
-    console.warn(`[jeff-scheduler] ${row.id} failed:`, msg);
+    if (!aborted) console.warn(`[jeff-scheduler] ${row.id} failed:`, msg);
     return { status: 'error', summary: msg };
+  } finally {
+    inflight.delete(jobId);
   }
 }
 

@@ -34,7 +34,9 @@ export function WeekView({ now }: { now: Date }) {
   const open = items.filter((b) => !b.completedAt);
   const nowItems = open.filter((b) => b.stage === 'now');
   const dueThisWeek = open.filter((b) => b.flag === 'due-soon' || b.flag === 'overdue');
-  const tasksToday = tasks.filter((t) => !t.done && (t.due === 'today' || t.due === 'tomorrow'));
+  // Surface anything that's overdue, due today/tomorrow, or coming up in the next 7 days.
+  // Tolerates both ISO YYYY-MM-DD (modern) and the legacy "today"/"tomorrow" free-form strings.
+  const tasksToday = tasks.filter((t) => !t.done && isTaskNearDue(t.due, now));
   const todayEvents = events.filter((e) => e.day === 0).sort((a, b) => a.start - b.start);
   const recentDocs = PRODUCT_DOCS.filter((d) => d.updated.includes('today') || d.updated.includes('yesterday')).slice(0, 3);
 
@@ -116,18 +118,21 @@ export function WeekView({ now }: { now: Date }) {
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
               borderRadius: 8, overflow: 'hidden',
             }}>
-              {tasksToday.map((t, i) => (
-                <div key={t.id} className="row-hover" style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 14px',
-                  borderBottom: i < tasksToday.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                }}>
-                  <span style={{ width: 14, height: 14, border: '1.5px solid var(--border-strong)', borderRadius: 3, flexShrink: 0 }} />
-                  <span style={{ fontSize: 13, color: 'var(--fg-1)', flex: 1 }}>{t.title}</span>
-                  <span className="meta" style={{ fontSize: 9.5, color: t.due === 'today' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{t.due}</span>
-                  <Avatar who={t.owner} size={18} />
-                </div>
-              ))}
+              {tasksToday.map((t, i) => {
+                const label = describeDue(t.due, now);
+                return (
+                  <div key={t.id} className="row-hover" style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 14px',
+                    borderBottom: i < tasksToday.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                  }}>
+                    <span style={{ width: 14, height: 14, border: '1.5px solid var(--border-strong)', borderRadius: 3, flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: 'var(--fg-1)', flex: 1 }}>{t.title}</span>
+                    <span className="meta" style={{ fontSize: 9.5, color: label.tone === 'urgent' ? 'var(--danger-fg)' : 'var(--fg-4)' }}>{label.text}</span>
+                    <Avatar who={t.owner} size={18} />
+                  </div>
+                );
+              })}
             </div>
           </Section>
 
@@ -304,6 +309,45 @@ function formatWeeklyAgo(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+/** Render a task's due into a short human label + tone, normalising both ISO dates and
+ *  legacy strings ("today", "tomorrow", "Fri…"). Anything in the past or due today is
+ *  marked urgent so the row goes red. */
+function describeDue(due: string | null | undefined, now: Date): { text: string; tone: 'normal' | 'urgent' } {
+  if (!due) return { text: '', tone: 'normal' };
+  const lower = due.trim().toLowerCase();
+  if (lower === 'today' || lower === 'overdue') return { text: lower, tone: 'urgent' };
+  if (lower === 'tomorrow') return { text: 'tomorrow', tone: 'normal' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return { text: due, tone: 'normal' };
+  const d = new Date(due + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return { text: due, tone: 'normal' };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diff = Math.round((d.getTime() - today.getTime()) / dayMs);
+  if (diff < 0)  return { text: `${-diff}d overdue`, tone: 'urgent' };
+  if (diff === 0) return { text: 'today', tone: 'urgent' };
+  if (diff === 1) return { text: 'tomorrow', tone: 'normal' };
+  if (diff <= 7)  return { text: d.toLocaleDateString('en-GB', { weekday: 'short' }).toLowerCase(), tone: 'normal' };
+  return { text: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), tone: 'normal' };
+}
+
+/** Is the task close enough to its due date to surface on the Today page?
+ *  - Legacy strings 'today' / 'tomorrow' (case-insensitive) — yes.
+ *  - ISO YYYY-MM-DD — yes if it's overdue, today, tomorrow, or within the next 7 days.
+ *  - Anything we can't parse — no (avoids spamming Today with malformed rows). */
+function isTaskNearDue(due: string | null | undefined, now: Date): boolean {
+  if (!due) return false;
+  const lower = due.trim().toLowerCase();
+  if (lower === 'today' || lower === 'tomorrow' || lower === 'overdue') return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return false;
+  // Compare day-by-day, ignoring time-of-day, in local time.
+  const d = new Date(due + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diffDays = Math.round((d.getTime() - today.getTime()) / dayMs);
+  return diffDays <= 7; // overdue (negative) or within the next week
 }
 
 function getWeekNumber(d: Date): number {

@@ -16,7 +16,7 @@ import {
   type JeffMemory,
   type MemoryKind,
 } from '../services/jeff.js';
-import { runJobNow } from '../services/jeff-scheduler.js';
+import { runJobNow, cancelJob, listRunningJobs } from '../services/jeff-scheduler.js';
 export const agentRouter = Router();
 
 // 5MB is enough for any logo. Bigger images belong directly in Drive via the regular upload.
@@ -274,6 +274,20 @@ agentRouter.post('/schedule/:jobId/run', async (req, res) => {
   } catch (err: any) {
     res.status(err.status ?? 500).json({ error: err.message ?? 'Run failed' });
   }
+});
+
+/** Cancel a currently-running job. Aborts the in-flight Anthropic request — the run
+ *  promise rejects and is logged as "Cancelled by user." */
+agentRouter.post('/schedule/:jobId/cancel', (req, res) => {
+  const ok = cancelJob(req.params.jobId);
+  if (!ok) return res.status(404).json({ error: 'Not currently running' });
+  res.json({ ok: true });
+});
+
+/** Snapshot of which jobs are running right now. Lets the UI restore the spinner state
+ *  after a page refresh and recognise scheduler-initiated runs. */
+agentRouter.get('/schedule/running', (_req, res) => {
+  res.json({ running: listRunningJobs() });
 });
 
 // ─── Runs ───────────────────────────────────────────────────────────────────

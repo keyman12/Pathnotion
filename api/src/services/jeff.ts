@@ -245,6 +245,9 @@ export async function askJeff(opts: {
   history?: ChatTurn[];
   message: string;
   maxSteps?: number;
+  /** Optional AbortSignal — when triggered, the in-flight Anthropic request rejects
+   *  with an AbortError. Used by the scheduler so a user can cancel a running job. */
+  signal?: AbortSignal;
 }): Promise<{ text: string; model: string; toolCalls: ToolCallLog[] }> {
   // Lazy import so TS doesn't complain about circular dep at eval time.
   const { allTools, runTool } = await import('./jeff-tools.js');
@@ -263,13 +266,14 @@ export async function askJeff(opts: {
 
   let text = '';
   for (let step = 0; step < maxSteps; step++) {
+    if (opts.signal?.aborted) throw new Error('aborted');
     const response = await c.messages.create({
       model: JEFF_MODEL,
       max_tokens: MAX_OUTPUT_TOKENS,
       system,
       messages,
       tools,
-    });
+    }, { signal: opts.signal });
 
     // Push the assistant turn so tool results can refer back to it.
     messages.push({ role: 'assistant', content: response.content });
@@ -331,7 +335,7 @@ function blocksToPlainText(blocksJson: string | null): string {
   }
 }
 
-async function summariseText(title: string, body: string, scope: string | null, systemPrompt: string): Promise<string> {
+async function summariseText(title: string, body: string, scope: string | null, systemPrompt: string, signal?: AbortSignal): Promise<string> {
   if (!apiKey()) {
     // No API key — fall back to the first ~500 chars so the scan still produces useful rows.
     const trimmed = body.replace(/\s+/g, ' ').trim().slice(0, 500);
@@ -347,7 +351,7 @@ async function summariseText(title: string, body: string, scope: string | null, 
       role: 'user',
       content: `Title: ${title}${scopeHint}\n\nBody:\n${body || '(empty)'}`,
     }],
-  });
+  }, { signal });
   const text = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
   return text || body.slice(0, 300);
 }
@@ -355,7 +359,7 @@ async function summariseText(title: string, body: string, scope: string | null, 
 /** Scan PathNotion articles. Walks through every doc, summarises the body, and upserts a memory row.
  *  Skips articles whose `updated_at` matches the previously-stored `source_updated_at` (cheap idempotency).
  *  `jobId` lets the scheduler pass in the parallel job row so we can read a custom prompt override. */
-export async function scanArticleMemories(opts: { jobId?: string | null } = {}): Promise<{ scanned: number; updated: number; skipped: number }> {
+export async function scanArticleMemories(opts: { jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ scanned: number; updated: number; skipped: number }> {
   const rows = db.prepare(`
     SELECT d.id, d.title, d.root, d.product_id, d.group_name, d.tags, d.updated_at,
            (SELECT json_group_array(json(data)) FROM doc_blocks WHERE doc_id = d.id) AS blocks_json
@@ -372,8 +376,9 @@ export async function scanArticleMemories(opts: { jobId?: string | null } = {}):
     const existing = db.prepare('SELECT source_updated_at FROM jeff_memories WHERE kind = ? AND source_id = ?').get('article', row.id) as { source_updated_at: string | null } | undefined;
     if (existing && existing.source_updated_at === row.updated_at) { skipped++; continue; }
 
+    if (opts.signal?.aborted) throw new Error('aborted');
     const body = blocksToPlainText(row.blocks_json);
-    const summary = await summariseText(row.title, body, row.root, systemPrompt);
+    const summary = await summariseText(row.title, body, row.root, systemPrompt, opts.signal);
     const tags = row.tags ? (JSON.parse(row.tags) as string[]) : [];
     const scope = row.root && row.root !== 'product' ? row.root : (row.product_id ?? null);
     writeMemory({
@@ -409,6 +414,7 @@ async function summariseFileContent(
   entry: DriveEntry,
   content: NonNullable<Awaited<ReturnType<typeof fetchFileContent>>>,
   system: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const c = client();
 
@@ -420,7 +426,7 @@ async function summariseFileContent(
       max_tokens: 220,
       system,
       messages: [{ role: 'user', content: `File: ${entry.name}\nType: ${entry.mimeType}\n\n${trimmed}` }],
-    });
+    }, { signal });
     return res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
   }
 
@@ -438,7 +444,7 @@ async function summariseFileContent(
       role: 'user',
       content: [block, { type: 'text', text: `File: ${entry.name}` }],
     }],
-  });
+  }, { signal });
   return res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
 }
 
@@ -450,7 +456,7 @@ async function summariseFileContent(
  *  2. Pinned folders in `jeff_pinned_folders` — walk each one up to the cap (split evenly)
  *  3. Fall back to the shared-drive root
  */
-export async function scanDriveFiles(opts: { maxFiles?: number; rootId?: string; jobId?: string | null } = {}): Promise<{ scanned: number; updated: number; skipped: number; skippedNoKey?: boolean; skippedNoPins?: boolean; roots: Array<{ id: string; name: string }> }> {
+export async function scanDriveFiles(opts: { maxFiles?: number; rootId?: string; jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ scanned: number; updated: number; skipped: number; skippedNoKey?: boolean; skippedNoPins?: boolean; roots: Array<{ id: string; name: string }> }> {
   if (!apiKey()) {
     return { scanned: 0, updated: 0, skipped: 0, skippedNoKey: true, roots: [] };
   }
@@ -498,6 +504,7 @@ export async function scanDriveFiles(opts: { maxFiles?: number; rootId?: string;
   let updated = 0;
   let skipped = 0;
   for (const f of files) {
+    if (opts.signal?.aborted) throw new Error('aborted');
     const existing = db.prepare('SELECT source_updated_at FROM jeff_memories WHERE kind = ? AND source_id = ?').get('drive-file', f.id) as { source_updated_at: string | null } | undefined;
     if (existing && existing.source_updated_at === f.modifiedTime) { skipped++; continue; }
 
@@ -513,7 +520,7 @@ export async function scanDriveFiles(opts: { maxFiles?: number; rootId?: string;
 
     try {
       // eslint-disable-next-line no-await-in-loop
-      const summary = await summariseFileContent(f, content, getJobPrompt(opts.jobId ?? null, 'scan-drive-files'));
+      const summary = await summariseFileContent(f, content, getJobPrompt(opts.jobId ?? null, 'scan-drive-files'), opts.signal);
       writeMemory({
         kind: 'drive-file',
         sourceId: f.id,
@@ -553,7 +560,7 @@ function buildWeeklyContext(): WeeklyContext {
   return { taskList, backlogList, upcomingEvents, memorySnippets };
 }
 
-export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Promise<{ text: string; memoryId: string; driveFileId: string | null }> {
+export async function runWeeklySummary(opts: { jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ text: string; memoryId: string; driveFileId: string | null }> {
   const c = client();
   const ctx = buildWeeklyContext();
   const userMessage = `Open tasks:\n${ctx.taskList}\n\nBacklog (now + next):\n${ctx.backlogList}\n\nUpcoming events:\n${ctx.upcomingEvents}\n\nRecent memory:\n${ctx.memorySnippets}`;
@@ -562,7 +569,7 @@ export async function runWeeklySummary(opts: { jobId?: string | null } = {}): Pr
     max_tokens: 1200,
     system: getJobPrompt(opts.jobId ?? null, 'weekly-summary'),
     messages: [{ role: 'user', content: userMessage }],
-  });
+  }, { signal: opts.signal });
   const rawText = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('').trim();
   const body = stripJeffMonologue(rawText);
 
@@ -706,7 +713,7 @@ function buildTeaser(body: string, max = 500): string {
 
 // ─── Daily news scan ────────────────────────────────────────────────────────
 
-async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ memoryId: string; driveFileId: string | null; competitors: number }> {
+async function runDailyNews(opts: { jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ memoryId: string; driveFileId: string | null; competitors: number }> {
   const instruction = getJobPrompt(opts.jobId ?? null, 'daily-news');
   // Context append is now opt-in via placeholders so unrelated news jobs (payments industry,
   // regulatory watch) don't get the competitor list forced in. If the prompt references
@@ -717,7 +724,7 @@ async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ mem
   const message = instruction
     .replaceAll('{competitors}', names)
     .replaceAll('{today}', today);
-  const result = await askJeff({ message });
+  const result = await askJeff({ message, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   const title = `Daily news — ${today}`;
@@ -751,7 +758,7 @@ async function runDailyNews(opts: { jobId?: string | null } = {}): Promise<{ mem
 
 // ─── Competitor feature watch ───────────────────────────────────────────────
 
-async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Promise<{ competitors: number; features: number; driveFileId: string | null }> {
+async function runCompetitorFeatures(opts: { jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ competitors: number; features: number; driveFileId: string | null }> {
   const competitors = db.prepare('SELECT id, name, homepage FROM jeff_competitors WHERE enabled = 1 AND homepage IS NOT NULL').all() as Array<{ id: string; name: string; homepage: string }>;
   if (!competitors.length) return { competitors: 0, features: 0, driveFileId: null };
 
@@ -760,7 +767,7 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
 
   const instruction = getJobPrompt(opts.jobId ?? null, 'competitor-features');
   const message = `${instruction}\n\nCompetitors:\n${list}`;
-  const result = await askJeff({ message, maxSteps: 10 });
+  const result = await askJeff({ message, maxSteps: 10, signal: opts.signal });
   const afterCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
   const body = stripJeffMonologue(result.text);
 
@@ -797,7 +804,7 @@ async function runCompetitorFeatures(opts: { jobId?: string | null } = {}): Prom
 
 // ─── Research materials refresh ─────────────────────────────────────────────
 
-async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise<{ competitors: number; digested: number }> {
+async function runResearchRefresh(opts: { jobId?: string | null; signal?: AbortSignal } = {}): Promise<{ competitors: number; digested: number }> {
   // Competitors with a press page configured — we can actually do something for these.
   const rows = db.prepare(`
     SELECT id, name, press_page_url AS pressPageUrl, region
@@ -815,7 +822,7 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
   const instruction = getJobPrompt(opts.jobId ?? null, 'research-refresh');
   const message = `${instruction}\n\nCompetitors (all have press pages):\n${list}`;
 
-  const result = await askJeff({ message, maxSteps: rows.length * 2 + 4 });
+  const result = await askJeff({ message, maxSteps: rows.length * 2 + 4, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   // Save the narrative as a memory so the Week view / chat can reference today's refresh at a glance.
@@ -854,17 +861,18 @@ async function runResearchRefresh(opts: { jobId?: string | null } = {}): Promise
 export type JobKind = 'scan-memories' | 'scan-drive-files' | 'weekly-summary' | 'daily-news' | 'competitor-features' | 'research-refresh';
 
 /** Run a job by kind. The scheduler passes the jobId so each runner can pick up a custom
- *  prompt override for this particular job row. */
-export async function runJob(kind: JobKind, jobId?: string | null): Promise<{ summary: string; changes: number }> {
+ *  prompt override for this particular job row. The optional `signal` lets the scheduler
+ *  abort an in-flight run from outside (e.g. user clicked Stop). */
+export async function runJob(kind: JobKind, jobId?: string | null, signal?: AbortSignal): Promise<{ summary: string; changes: number }> {
   if (kind === 'scan-memories') {
-    const r = await scanArticleMemories({ jobId });
+    const r = await scanArticleMemories({ jobId, signal });
     return {
       summary: `Scanned ${r.scanned} articles — ${r.updated} updated, ${r.skipped} unchanged.`,
       changes: r.updated,
     };
   }
   if (kind === 'scan-drive-files') {
-    const r = await scanDriveFiles({ jobId });
+    const r = await scanDriveFiles({ jobId, signal });
     if (r.skippedNoKey) {
       return { summary: 'ANTHROPIC_API_KEY not set — Drive file scan needs the API to summarise PDFs and images. Skipped.', changes: 0 };
     }
@@ -880,7 +888,7 @@ export async function runJob(kind: JobKind, jobId?: string | null): Promise<{ su
     };
   }
   if (kind === 'weekly-summary') {
-    const r = await runWeeklySummary({ jobId });
+    const r = await runWeeklySummary({ jobId, signal });
     return {
       summary: r.driveFileId
         ? `Wrote weekly summary (memory ${r.memoryId}, Drive file ${r.driveFileId}).`
@@ -889,21 +897,21 @@ export async function runJob(kind: JobKind, jobId?: string | null): Promise<{ su
     };
   }
   if (kind === 'daily-news') {
-    const r = await runDailyNews({ jobId });
+    const r = await runDailyNews({ jobId, signal });
     return {
       summary: `Drafted news digest across ${r.competitors} competitor${r.competitors === 1 ? '' : 's'} (memory ${r.memoryId}).`,
       changes: 1,
     };
   }
   if (kind === 'competitor-features') {
-    const r = await runCompetitorFeatures({ jobId });
+    const r = await runCompetitorFeatures({ jobId, signal });
     return {
       summary: `Checked ${r.competitors} competitor${r.competitors === 1 ? '' : 's'}, recorded ${r.features} new feature${r.features === 1 ? '' : 's'}.`,
       changes: r.features,
     };
   }
   if (kind === 'research-refresh') {
-    const r = await runResearchRefresh({ jobId });
+    const r = await runResearchRefresh({ jobId, signal });
     if (r.competitors === 0) {
       return { summary: 'No competitors with a press page URL configured — nothing to refresh. Add press page URLs in Settings → Jeff.', changes: 0 };
     }

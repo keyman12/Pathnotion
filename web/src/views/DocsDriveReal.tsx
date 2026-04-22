@@ -1550,11 +1550,20 @@ function FilePreviewDrawer({ fileId, onClose }: {
   const entryQ = useDriveEntry(fileId);
   const entry = entryQ.data ?? null;
   const error = entryQ.error as Error | null | undefined;
+  const [fullscreen, setFullscreen] = useState(false);
+
+  // Esc exits fullscreen first, then nothing — drawer close is handled elsewhere.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFullscreen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
 
   if (error) {
     return (
       <div style={drawerStyle()}>
-        <DrawerHeader title="Error" kindColor="#B02626" onClose={onClose} onFullscreen={() => {}} />
+        <DrawerHeader title="Error" kindColor="#B02626" onClose={onClose} onFullscreen={() => {}} onOpenDrive={() => {}} />
         <div style={{ padding: 20, color: 'var(--danger-fg)' }}>{error.message}</div>
       </div>
     );
@@ -1572,30 +1581,80 @@ function FilePreviewDrawer({ fileId, onClose }: {
   const openInDrive = () => window.open(entry.webViewLink ?? '#', '_blank', 'noopener,noreferrer');
 
   return (
-    <div style={drawerStyle()}>
-      <DrawerHeader
-        title={entry.name}
-        kindColor={tint}
-        subtitle={`${kindLabel(kind)} · ${relativeTime(entry.modifiedTime)}`}
-        onClose={onClose}
-        onFullscreen={openInDrive}
-      />
-      {/* Toolbar lives in the middle pane now (matches the prototype). This drawer shows
-          the inline preview (Drive's own iframe viewer) + metadata. */}
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <DrivePreviewFrame entry={entry} kind={kind} />
-          <DetailRow label="Owner">
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Avatar who={ownerKey(entry)} size={18} />
-              {entry.owners[0]?.displayName ?? entry.owners[0]?.emailAddress ?? '—'}
-            </div>
-          </DetailRow>
-          <DetailRow label="Modified">{relativeTime(entry.modifiedTime)}</DetailRow>
-          {entry.size != null && <DetailRow label="Size">{humanBytes(entry.size)}</DetailRow>}
-          <DetailRow label="Type">{kindLabel(kind)}</DetailRow>
+    <>
+      <div style={drawerStyle()}>
+        <DrawerHeader
+          title={entry.name}
+          kindColor={tint}
+          subtitle={`${kindLabel(kind)} · ${relativeTime(entry.modifiedTime)}`}
+          onClose={onClose}
+          onFullscreen={() => setFullscreen(true)}
+          onOpenDrive={openInDrive}
+        />
+        {/* Toolbar lives in the middle pane now (matches the prototype). This drawer shows
+            the inline preview (Drive's own iframe viewer) + metadata. */}
+        <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <DrivePreviewFrame entry={entry} kind={kind} />
+            <DetailRow label="Owner">
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Avatar who={ownerKey(entry)} size={18} />
+                {entry.owners[0]?.displayName ?? entry.owners[0]?.emailAddress ?? '—'}
+              </div>
+            </DetailRow>
+            <DetailRow label="Modified">{relativeTime(entry.modifiedTime)}</DetailRow>
+            {entry.size != null && <DetailRow label="Size">{humanBytes(entry.size)}</DetailRow>}
+            <DetailRow label="Type">{kindLabel(kind)}</DetailRow>
+          </div>
         </div>
       </div>
+      {fullscreen && (
+        <FullscreenPreview entry={entry} onClose={() => setFullscreen(false)} onOpenDrive={openInDrive} />
+      )}
+    </>
+  );
+}
+
+/** In-app fullscreen for the preview iframe — covers the whole viewport with a back button
+ *  at the top-left so the user always has a way home. Replaces the old "Fullscreen = open
+ *  Drive in a new tab" behaviour, which left users stranded on Drive's site. */
+function FullscreenPreview({ entry, onClose, onOpenDrive }: { entry: DriveEntry; onClose: () => void; onOpenDrive: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1300,
+      background: 'var(--bg-canvas)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 16px',
+        borderBottom: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
+      }}>
+        <button
+          onClick={onClose}
+          className="btn btn-subtle"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 13 }}
+          autoFocus
+        >
+          <Icon name="chevron-left" size={14} sw={2.1} /> Back to Docs
+        </button>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {entry.name}
+        </div>
+        <button
+          onClick={onOpenDrive}
+          className="btn btn-subtle"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 13 }}
+        >
+          <Icon name="arrow-up-right" size={13} sw={2.1} /> Open in Drive
+        </button>
+      </div>
+      <iframe
+        src={`https://drive.google.com/file/d/${entry.id}/preview`}
+        title={entry.name}
+        style={{ flex: 1, width: '100%', border: 0, background: 'var(--bg-sunken)' }}
+      />
     </div>
   );
 }
@@ -1715,12 +1774,13 @@ function drawerStyle(): React.CSSProperties {
   };
 }
 
-function DrawerHeader({ title, subtitle, kindColor, onClose, onFullscreen }: {
+function DrawerHeader({ title, subtitle, kindColor, onClose, onFullscreen, onOpenDrive }: {
   title: string;
   subtitle?: string;
   kindColor: string;
   onClose: () => void;
   onFullscreen: () => void;
+  onOpenDrive: () => void;
 }) {
   return (
     <div style={{
@@ -1737,7 +1797,8 @@ function DrawerHeader({ title, subtitle, kindColor, onClose, onFullscreen }: {
         <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
         {subtitle && <div className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>{subtitle}</div>}
       </div>
-      <button className="btn btn-subtle btn-icon" onClick={onFullscreen} title="Open in Drive"><Icon name="arrow-up-right" size={14} sw={2.1} /></button>
+      <button className="btn btn-subtle btn-icon" onClick={onFullscreen} title="Open in fullscreen"><Icon name="expand" size={14} sw={2.1} /></button>
+      <button className="btn btn-subtle btn-icon" onClick={onOpenDrive} title="Open in Drive"><Icon name="arrow-up-right" size={14} sw={2.1} /></button>
       <button className="btn btn-subtle btn-icon" onClick={onClose} title="Close"><Icon name="x" size={14} sw={2.1} /></button>
     </div>
   );

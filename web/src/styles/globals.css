@@ -110,6 +110,10 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .row-actions-btn--open { opacity: 1; pointer-events: auto; }
 .row-actions-btn:hover { background: var(--bg-active) !important; color: var(--fg-1) !important; }
 
+/* Spinning indicator — used on scheduled-job Run buttons while a job is in flight. */
+@keyframes pn-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.pn-spin { animation: pn-spin 0.9s linear infinite; transform-origin: center; }
+
 .chip {
   display: inline-flex;
   align-items: center;

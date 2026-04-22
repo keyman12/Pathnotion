@@ -811,19 +811,22 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, on
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!title.trim() || !id.trim()}>Create</button>
+          <button type="submit" className="btn btn-primary" disabled={!title.trim() || !id.trim() || !product}>Create</button>
         </div>
       </form>
     </div>
   );
 }
 
+// Plain <div> wrapper — using <label> here interfered with the Dropdown's <button> trigger:
+// clicks on dropdown options bubbled up to the label, which the browser then routed back to the
+// labelable button (re-opening the dropdown). Keeping the field as a div fixes selection.
 function Row2({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'center', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'center', gap: 12 }}>
       <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>{label}</span>
       <div>{children}</div>
-    </label>
+    </div>
   );
 }
 

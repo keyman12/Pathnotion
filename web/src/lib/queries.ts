@@ -203,7 +203,25 @@ export function useRunAgentJob() {
       qc.invalidateQueries({ queryKey: ['agent', 'runs'] });
       qc.invalidateQueries({ queryKey: ['agent', 'memories'] });
       qc.invalidateQueries({ queryKey: ['agent', 'status'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'today-feed'] });
     },
+  });
+}
+export function useCancelAgentJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.agent.cancelJob(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'running'] }),
+  });
+}
+/** Polls every 3s while any job is running so the spinner clears the moment the run ends.
+ *  When nothing is running, polling stops. */
+export function useRunningJobs() {
+  return useQuery({
+    queryKey: ['agent', 'running'],
+    queryFn: () => api.agent.runningJobs(),
+    refetchInterval: (q) => (q.state.data?.running?.length ? 3000 : false),
+    staleTime: 1000,
   });
 }
 export function useJeffMemories(kind?: string, limit?: number) {

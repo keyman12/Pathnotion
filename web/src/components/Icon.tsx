@@ -5,7 +5,7 @@ export type IconName =
   | 'search' | 'plus' | 'chevron-down' | 'chevron-right' | 'chevron-left' | 'chevron-up'
   | 'filter' | 'more' | 'more-v' | 'edit' | 'bell' | 'settings' | 'close' | 'check'
   | 'link' | 'paperclip' | 'clock' | 'flag' | 'circle' | 'circle-check' | 'circle-dot'
-  | 'sync' | 'send' | 'sparkle' | 'play' | 'pause' | 'file' | 'file-pdf' | 'sheet'
+  | 'sync' | 'send' | 'sparkle' | 'play' | 'pause' | 'stop' | 'spinner' | 'expand' | 'file' | 'file-pdf' | 'sheet'
   | 'lock' | 'shield' | 'eye' | 'drag' | 'users' | 'money' | 'scale' | 'trend'
   | 'refresh' | 'table' | 'comment' | 'x' | 'download' | 'upload' | 'grid' | 'list'
   | 'arrow-up-right' | 'arrow-right' | 'trend-up' | 'trend-down'
@@ -18,9 +18,10 @@ interface Props {
   color?: string;
   sw?: number;
   style?: CSSProperties;
+  className?: string;
 }
 
-export function Icon({ name, size = 16, color = 'currentColor', sw = 1.6, style }: Props) {
+export function Icon({ name, size = 16, color = 'currentColor', sw = 1.6, style, className }: Props) {
   const common = {
     width: size,
     height: size,
@@ -31,6 +32,7 @@ export function Icon({ name, size = 16, color = 'currentColor', sw = 1.6, style 
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     style,
+    className,
     'aria-hidden': true,
   };
 
@@ -134,6 +136,14 @@ export function Icon({ name, size = 16, color = 'currentColor', sw = 1.6, style 
       return <svg {...common}><path d="M6 4.5v11l9-5.5z"/></svg>;
     case 'pause':
       return <svg {...common}><rect x="5.5" y="4.5" width="3" height="11" rx="0.6"/><rect x="11.5" y="4.5" width="3" height="11" rx="0.6"/></svg>;
+    case 'stop':
+      return <svg {...common} fill={color}><rect x="6" y="6" width="8" height="8" rx="1" stroke="none"/></svg>;
+    case 'spinner':
+      // Spinning ring for "running" state. Animation comes from a CSS class on the wrapper.
+      return <svg {...common}><circle cx="10" cy="10" r="6.5" strokeOpacity="0.25"/><path d="M10 3.5 a6.5 6.5 0 0 1 6.5 6.5"/></svg>;
+    case 'expand':
+      // Four corner arrows pointing outward — universal "enter fullscreen" glyph.
+      return <svg {...common}><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4"/></svg>;
     case 'file':
       return <svg {...common}><path d="M5 3 H12 L15 6 V17 H5 Z"/><path d="M12 3 V6 H15"/></svg>;
     case 'file-pdf':

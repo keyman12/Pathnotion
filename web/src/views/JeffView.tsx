@@ -27,6 +27,8 @@ import {
   usePatchAgentJob,
   usePinnedFolders,
   useRunAgentJob,
+  useCancelAgentJob,
+  useRunningJobs,
   useScanDriveFiles,
   useScanMemories,
   useSendJeffMessage,
@@ -577,9 +579,15 @@ function ScheduleTab() {
   const jobsQ = useAgentJobs();
   const patch = usePatchAgentJob();
   const runNow = useRunAgentJob();
+  const cancelJob = useCancelAgentJob();
+  const runningQ = useRunningJobs();
   const deleteJob = useDeleteAgentJob();
   const jobs: AgentJob[] = jobsQ.data ?? [];
   const [editing, setEditing] = useState<AgentJob | 'new' | null>(null);
+
+  // Running set comes from the server snapshot — survives page refresh and shows scheduler-
+  // started runs too. The polling loop in useRunningJobs ticks every 3s while anything's running.
+  const runningIds = new Set((runningQ.data?.running ?? []).map((r) => r.jobId));
 
   if (jobsQ.isLoading) return <div style={{ padding: 20, color: 'var(--fg-3)' }}>Loading…</div>;
 
@@ -587,10 +595,16 @@ function ScheduleTab() {
   const onRun = async (j: AgentJob) => {
     try {
       const r = await runNow.mutateAsync(j.id);
-      alert(`Ran ${j.name}: ${r.summary}`);
+      // Cancelled runs come back as { status: 'error', summary: 'Cancelled by user.' } —
+      // don't pop an alert for those, the spinner clearing already tells the story.
+      if (r.summary !== 'Cancelled by user.') alert(`Ran ${j.name}: ${r.summary}`);
     } catch (err) {
       alert(`Run failed: ${(err as Error).message}`);
     }
+  };
+  const onCancel = async (j: AgentJob) => {
+    try { await cancelJob.mutateAsync(j.id); }
+    catch (err) { alert(`Couldn't cancel: ${(err as Error).message}`); }
   };
   const onDelete = async (j: AgentJob) => {
     if (!confirm(`Delete job "${j.name}"? This is permanent.`)) return;
@@ -616,22 +630,41 @@ function ScheduleTab() {
           alignItems: 'center',
           gap: 14,
         }}>
-          {/* Green play while enabled, grey pause while off — matches the prototype's lead glyph. */}
-          <button
-            onClick={() => onRun(j)}
-            disabled={runNow.isPending}
-            title={j.enabled ? 'Run this job now' : 'Run this job now (disabled on schedule)'}
-            style={{
-              width: 28, height: 28, borderRadius: 6,
-              background: j.enabled ? 'var(--path-primary-tint)' : 'var(--bg-sunken)',
-              border: '1px solid var(--border-subtle)',
-              color: j.enabled ? 'var(--path-primary)' : 'var(--fg-4)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', flexShrink: 0,
-            }}
-          >
-            <Icon name={j.enabled ? 'play' : 'pause'} size={12} />
-          </button>
+          {/* While the job is running, the lead glyph becomes a spinner that doubles as a Stop
+              button — single affordance, no two-state ambiguity. Idle: green play (or grey pause
+              when the schedule is off). Running: green spinning ring; click to abort. */}
+          {(() => {
+            const running = runningIds.has(j.id);
+            return (
+              <button
+                onClick={() => running ? onCancel(j) : onRun(j)}
+                disabled={!running && runNow.isPending}
+                title={running ? 'Click to stop this run' : (j.enabled ? 'Run this job now' : 'Run this job now (disabled on schedule)')}
+                aria-label={running ? `Stop ${j.name}` : `Run ${j.name}`}
+                style={{
+                  width: 28, height: 28, borderRadius: 6,
+                  background: running ? 'var(--path-primary-tint)' : (j.enabled ? 'var(--path-primary-tint)' : 'var(--bg-sunken)'),
+                  border: `1px solid ${running ? 'var(--path-primary)' : 'var(--border-subtle)'}`,
+                  color: j.enabled || running ? 'var(--path-primary)' : 'var(--fg-4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', flexShrink: 0,
+                  position: 'relative',
+                }}
+              >
+                {running
+                  ? <>
+                      {/* Spinner ring + small stop square layered on top so it's both "running"
+                          and "click to stop" without needing a hover state. */}
+                      <Icon name="spinner" size={20} className="pn-spin" sw={2} />
+                      <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Icon name="stop" size={10} />
+                      </span>
+                    </>
+                  : <Icon name={j.enabled ? 'play' : 'pause'} size={12} />
+                }
+              </button>
+            );
+          })()}
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>

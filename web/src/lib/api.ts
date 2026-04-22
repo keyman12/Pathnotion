@@ -155,6 +155,10 @@ export const api = {
       fetchJson<void>(`/agent/schedule/${id}`, { method: 'DELETE' }),
     runJobNow: (id: string) =>
       fetchJson<{ status: 'ok' | 'error'; summary: string }>(`/agent/schedule/${id}/run`, { method: 'POST' }),
+    cancelJob: (id: string) =>
+      fetchJson<{ ok: true }>(`/agent/schedule/${id}/cancel`, { method: 'POST' }),
+    runningJobs: () =>
+      fetchJson<{ running: Array<{ jobId: string; startedAt: string }> }>('/agent/schedule/running'),
     memories: (kind?: string, limit?: number) => {
       const q = new URLSearchParams();
       if (kind) q.set('kind', kind);
