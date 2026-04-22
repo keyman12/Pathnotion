@@ -1268,12 +1268,12 @@ function StyleSheetPanel() {
       <Section title="Output style guides" hint="Short prose guides Jeff applies when producing each kind of file. Keep to a few lines each.">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           {OUTPUT_FIELDS.map((o) => (
-            <Field key={o.key} label={o.label} hint={o.hint}>
+            <Field key={String(o.key)} label={o.label} hint={o.hint}>
               <textarea
                 className="input"
                 rows={3}
                 value={(outputs[o.key] ?? '') as string}
-                onChange={(e) => setOutput(o.key, e.target.value)}
+                onChange={(e) => setOutput(String(o.key), e.target.value)}
               />
             </Field>
           ))}
