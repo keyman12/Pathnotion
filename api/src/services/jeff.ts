@@ -548,9 +548,30 @@ interface WeeklyContext {
 }
 
 function buildWeeklyContext(): WeeklyContext {
-  const tasks = db.prepare("SELECT title, owner, due, status, priority FROM tasks WHERE status != 'done' ORDER BY due LIMIT 30").all() as any[];
-  const backlog = db.prepare("SELECT title, product, stage, owner FROM backlog_items WHERE stage IN ('now', 'next') ORDER BY sort_order LIMIT 30").all() as any[];
-  const events = db.prepare("SELECT title, start_iso, end_iso, location FROM calendar_events WHERE start_iso >= datetime('now') ORDER BY start_iso LIMIT 20").all() as any[];
+  // Column names match the schema: owner_key (not owner), done integer (not status enum),
+  // product_id (not product). The earlier alias-less version threw "no such column" so the
+  // weekly summary failed instantly — silent except for an alert popup.
+  const tasks = db.prepare(`
+    SELECT title, owner_key AS owner, due, priority
+    FROM tasks
+    WHERE done = 0
+    ORDER BY due
+    LIMIT 30
+  `).all() as any[];
+  const backlog = db.prepare(`
+    SELECT title, product_id AS product, stage, owner_key AS owner
+    FROM backlog_items
+    WHERE stage IN ('now', 'next') AND completed_at IS NULL
+    ORDER BY sort_order
+    LIMIT 30
+  `).all() as any[];
+  const events = db.prepare(`
+    SELECT title, start_iso, end_iso, location
+    FROM calendar_events
+    WHERE start_iso >= datetime('now')
+    ORDER BY start_iso
+    LIMIT 20
+  `).all() as any[];
 
   const memories = listMemories(15);
   const taskList = tasks.map((t: any) => `- ${t.owner}: ${t.title} (due ${t.due}${t.priority ? ' · ' + t.priority : ''})`).join('\n') || '(none)';

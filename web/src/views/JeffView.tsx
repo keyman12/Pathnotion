@@ -3,6 +3,7 @@
 // The status header surfaces the model name, memory count, and a link to Jeff's Drive folder.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Dropdown } from '../components/Dropdown';
@@ -576,6 +577,7 @@ const JOB_KINDS: Array<{ value: string; label: string; defaultName: string; defa
 ];
 
 function ScheduleTab() {
+  const qc = useQueryClient();
   const jobsQ = useAgentJobs();
   const patch = usePatchAgentJob();
   const runNow = useRunAgentJob();
@@ -584,15 +586,39 @@ function ScheduleTab() {
   const deleteJob = useDeleteAgentJob();
   const jobs: AgentJob[] = jobsQ.data ?? [];
   const [editing, setEditing] = useState<AgentJob | 'new' | null>(null);
+  // Local optimistic "I just clicked Run on these" set — fills the gap between click and
+  // the polling endpoint catching up (3s window otherwise). Cleared when the server's running
+  // list confirms our job is in flight, or when the run finishes.
+  const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
 
-  // Running set comes from the server snapshot — survives page refresh and shows scheduler-
-  // started runs too. The polling loop in useRunningJobs ticks every 3s while anything's running.
-  const runningIds = new Set((runningQ.data?.running ?? []).map((r) => r.jobId));
+  // Running set = server snapshot (survives refresh + shows scheduler-started runs) ∪ what
+  // we've just optimistically clicked. As soon as the server confirms, optimistic clears.
+  const serverRunning = new Set((runningQ.data?.running ?? []).map((r) => r.jobId));
+  const runningIds = new Set([...serverRunning, ...optimistic]);
+
+  // Drop optimistic entries the server has either confirmed or cleared.
+  useEffect(() => {
+    if (!optimistic.size) return;
+    setOptimistic((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of prev) {
+        // Confirmed: server now reports it running — let the server set drive the spinner.
+        // Cleared: server's running list refetched and doesn't include it (job done) — clear too.
+        if (serverRunning.has(id)) { next.delete(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [runningQ.dataUpdatedAt]);
 
   if (jobsQ.isLoading) return <div style={{ padding: 20, color: 'var(--fg-3)' }}>Loading…</div>;
 
   const onToggle = (j: AgentJob) => patch.mutate({ id: j.id, patch: { enabled: !j.enabled } });
   const onRun = async (j: AgentJob) => {
+    // Show the spinner the instant the user clicks — don't wait 3s for the polling endpoint.
+    setOptimistic((prev) => new Set(prev).add(j.id));
+    // Force an immediate poll so the server-confirmed state takes over fast.
+    qc.invalidateQueries({ queryKey: ['agent', 'running'] });
     try {
       const r = await runNow.mutateAsync(j.id);
       // Cancelled runs come back as { status: 'error', summary: 'Cancelled by user.' } —
@@ -600,11 +626,19 @@ function ScheduleTab() {
       if (r.summary !== 'Cancelled by user.') alert(`Ran ${j.name}: ${r.summary}`);
     } catch (err) {
       alert(`Run failed: ${(err as Error).message}`);
+    } finally {
+      setOptimistic((prev) => { const next = new Set(prev); next.delete(j.id); return next; });
+      qc.invalidateQueries({ queryKey: ['agent', 'running'] });
     }
   };
   const onCancel = async (j: AgentJob) => {
-    try { await cancelJob.mutateAsync(j.id); }
-    catch (err) { alert(`Couldn't cancel: ${(err as Error).message}`); }
+    try {
+      await cancelJob.mutateAsync(j.id);
+      // Don't wait for polling — clear our optimistic flag right away.
+      setOptimistic((prev) => { const next = new Set(prev); next.delete(j.id); return next; });
+    } catch (err) {
+      alert(`Couldn't cancel: ${(err as Error).message}`);
+    }
   };
   const onDelete = async (j: AgentJob) => {
     if (!confirm(`Delete job "${j.name}"? This is permanent.`)) return;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
@@ -141,7 +141,9 @@ export function BacklogView({ productFilter }: { productFilter?: string | null }
           defaultOwner={me}
           products={products}
           existingIds={items.map((i) => i.id)}
-          onClose={() => setShowNew(false)}
+          saving={createBacklog.isPending}
+          serverError={createBacklog.error ? (createBacklog.error as Error).message : null}
+          onClose={() => { createBacklog.reset(); setShowNew(false); }}
           onCreate={(body) => createBacklog.mutate(body, { onSuccess: () => setShowNew(false) })}
         />
       )}
@@ -704,16 +706,22 @@ function StageChipInline({ stage, flag }: { stage: Stage; flag?: 'overdue' | 'du
 }
 
 
-function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, onClose, onCreate }: {
+function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, saving, serverError, onClose, onCreate }: {
   defaultProduct: string;
   defaultOwner: FounderKey;
   products: Product[];
   existingIds: string[];
+  saving: boolean;
+  serverError: string | null;
   onClose: () => void;
   onCreate: (body: { id: string; title: string; product: string; stage: Stage; owner: FounderKey; note?: string | null; due?: string | null }) => void;
 }) {
+  // Track the IDs we've handed out this session so a fast second create doesn't collide
+  // with one the server hasn't refetched into our list yet.
+  const claimedRef = useRef<Set<string>>(new Set());
   const nextId = useMemo(() => {
-    const ns = existingIds
+    const all = new Set([...existingIds, ...claimedRef.current]);
+    const ns = Array.from(all)
       .map((id) => /^PTH-(\d+)$/.exec(id)?.[1])
       .filter((x): x is string => !!x)
       .map((x) => parseInt(x, 10));
@@ -729,9 +737,17 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, on
   const [note, setNote] = useState('');
   const [due, setDue] = useState('');
 
+  // If the dialog opens with no defaultProduct (e.g. products list still loading), fall back
+  // to the first product as soon as it shows up so the user isn't staring at an empty dropdown.
+  useEffect(() => {
+    if (!product && products.length) setProduct(products[0].id);
+  }, [products, product]);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     if (!title.trim() || !id.trim() || !product) return;
+    claimedRef.current.add(id.trim());
     onCreate({
       id: id.trim(),
       title: title.trim(),
@@ -809,9 +825,21 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, on
           <textarea value={note} onChange={(e) => setNote(e.target.value)} className="input" style={{ width: '100%', minHeight: 60, padding: '8px 10px', fontSize: 13, resize: 'vertical' }} />
         </Row2>
 
+        {serverError && (
+          <div style={{
+            padding: '8px 12px', borderRadius: 6,
+            background: 'var(--danger-bg)', color: 'var(--danger-fg)',
+            fontSize: 12.5, lineHeight: 1.4,
+          }}>
+            Couldn't save: {serverError}
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
           <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!title.trim() || !id.trim() || !product}>Create</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !title.trim() || !id.trim() || !product}>
+            {saving ? 'Saving…' : 'Create'}
+          </button>
         </div>
       </form>
     </div>
