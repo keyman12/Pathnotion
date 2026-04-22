@@ -36,8 +36,10 @@ echo "→ npm ci (root + workspaces)"
 npm ci
 
 # tsc + vite together can blow the default V8 old-space (~512MB) on small instances
-# like the EC2 t3.micro. 1.5GB is ample for our build and harmless on bigger boxes.
-export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}"
+# like the EC2 t3.micro. 2GB headroom (with the box's swap file) keeps the build inside
+# real RAM + swap and harmless on bigger boxes — it's a ceiling, not a reservation.
+# Forced (no `:-`) because npm scripts can sometimes inherit a smaller NODE_OPTIONS.
+export NODE_OPTIONS="--max-old-space-size=2048"
 
 echo "→ build api"
 npm --workspace api run build
