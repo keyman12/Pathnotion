@@ -46,7 +46,7 @@ npm --workspace web run build
 # restart — if sudoers.d/path-pathnotion grants it, this just works. If not, fall
 # through and print the command for a human.
 restart_note=""
-if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME.service" && sudo -n systemctl restart "$SERVICE_NAME" 2>/dev/null; then
+if command -v systemctl >/dev/null 2>&1 && systemctl cat "$SERVICE_NAME.service" >/dev/null 2>&1 && sudo -n systemctl restart "$SERVICE_NAME" 2>/dev/null; then
   echo "→ systemctl restart $SERVICE_NAME"
   sudo -n systemctl status "$SERVICE_NAME" --no-pager 2>/dev/null | head -8 || true
 elif command -v pm2 >/dev/null 2>&1 && pm2 describe "$SERVICE_NAME" >/dev/null 2>&1; then
