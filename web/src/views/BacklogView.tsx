@@ -786,12 +786,22 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, sa
           <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" style={{ width: '100%', height: 32 }} />
         </Row2>
         <Row2 label="Product">
-          <Dropdown<string>
-            value={product}
-            onChange={setProduct}
-            options={products.map((p) => ({ value: p.id, label: p.label }))}
-            ariaLabel="Product"
-          />
+          {products.length === 0 ? (
+            <div style={{
+              padding: '8px 12px', borderRadius: 6,
+              background: 'var(--danger-bg)', color: 'var(--danger-fg)',
+              fontSize: 12.5, lineHeight: 1.4,
+            }}>
+              No products yet. Add one in <b>Settings → Products</b>, then come back here.
+            </div>
+          ) : (
+            <Dropdown<string>
+              value={product}
+              onChange={setProduct}
+              options={products.map((p) => ({ value: p.id, label: p.label }))}
+              ariaLabel="Product"
+            />
+          )}
         </Row2>
         <Row2 label="Stage">
           <Dropdown<Stage>

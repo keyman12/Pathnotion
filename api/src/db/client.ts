@@ -126,6 +126,23 @@ try { db.exec('ALTER TABLE agent_jobs ADD COLUMN next_run_at TEXT'); } catch { /
 // Per-job Claude instruction override — if set, the job runner uses this instead of the built-in default.
 try { db.exec('ALTER TABLE agent_jobs ADD COLUMN prompt TEXT'); } catch { /* already present */ }
 
+// First-boot product seed. Without at least one product the Backlog dialog can't function
+// (Product is required), so a freshly-initialised prod box was unusable until the user manually
+// added one in Settings. INSERT OR IGNORE means user edits / additions are preserved, and a
+// product the user has deliberately removed stays removed — we only fill the blank-slate case.
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO products (id, label, color, accent, sort_order)
+    VALUES
+      ('dashboard', 'Dashboard',  '#297D2D', '#49BC4E', 1),
+      ('boarding',  'Boarding',   '#B42318', '#FF5252', 2),
+      ('sdk',       'Path SDK',   '#6B2A8F', '#B794F4', 3),
+      ('mcp',       'MCP Server', '#10298E', '#5470D6', 4),
+      ('emulator',  'Emulator',   '#B54708', '#F0A000', 5),
+      ('invoicing', 'Invoicing',  '#0068A3', '#6bb3ff', 6)
+  `).run();
+} catch { /* ignore — table may not exist on a freshly-failed migration */ }
+
 // Seed the standard Jeff jobs if they're not already present. They're owned by the scheduler
 // and can be toggled in Settings / the Jeff page.
 try {
