@@ -48,22 +48,38 @@ function firstGoogleTokens(): GoogleTokens | null {
   };
 }
 
-async function loadLogoDataUrl(fileId: string): Promise<string | null> {
-  const tokens = firstGoogleTokens();
-  if (!tokens) return null;
-  try {
-    const entry = await getEntry(tokens, fileId);
-    if (!entry) return null;
-    const content = await fetchFileContent(tokens, entry, { maxBytes: 2 * 1024 * 1024 });
-    if (!content || content.kind !== 'binary' || !content.mediaType.startsWith('image/')) return null;
-    // Strip near-white pixels so the same logo works on dark title slides and white content slides.
-    let bytes: Buffer = content.data;
-    let mediaType = content.mediaType;
-    try { bytes = await stripNearWhite(content.data); mediaType = 'image/png'; } catch { /* keep original */ }
-    return `data:${mediaType};base64,${bytes.toString('base64')}`;
-  } catch {
-    return null;
+async function loadLogoDataUrl(logo: { dataUrl?: string; fileId?: string } | null | undefined): Promise<string | null> {
+  if (!logo) return null;
+  // New path: the style sheet stores logos as data URLs inline. Strip near-white pixels so
+  // the same logo works on dark title slides and white content slides.
+  if (logo.dataUrl) {
+    const m = /^data:[^;]+;base64,(.+)$/.exec(logo.dataUrl);
+    if (!m) return logo.dataUrl;  // not base64 — hand back as-is
+    try {
+      const cleaned = await stripNearWhite(Buffer.from(m[1], 'base64'));
+      return `data:image/png;base64,${cleaned.toString('base64')}`;
+    } catch {
+      return logo.dataUrl;
+    }
   }
+  // Back-compat: legacy logos stored by Drive file id.
+  if (logo.fileId) {
+    const tokens = firstGoogleTokens();
+    if (!tokens) return null;
+    try {
+      const entry = await getEntry(tokens, logo.fileId);
+      if (!entry) return null;
+      const content = await fetchFileContent(tokens, entry, { maxBytes: 2 * 1024 * 1024 });
+      if (!content || content.kind !== 'binary' || !content.mediaType.startsWith('image/')) return null;
+      let bytes: Buffer = content.data;
+      let mediaType = content.mediaType;
+      try { bytes = await stripNearWhite(content.data); mediaType = 'image/png'; } catch { /* keep original */ }
+      return `data:${mediaType};base64,${bytes.toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 /** pptxgenjs expects colours as 6-char hex without the leading `#`. */
@@ -87,8 +103,8 @@ export async function renderPresentation(input: PresentationInput): Promise<Rend
   const ts = brand.typeScale ?? {};
 
   const [logoLight, logoDark] = await Promise.all([
-    brand.logoLight?.fileId ? loadLogoDataUrl(brand.logoLight.fileId) : Promise.resolve(null),
-    brand.logoDark?.fileId  ? loadLogoDataUrl(brand.logoDark.fileId)  : Promise.resolve(null),
+    loadLogoDataUrl(brand.logoLight ?? null),
+    loadLogoDataUrl(brand.logoDark  ?? null),
   ]);
 
   const mod: any = await import('pptxgenjs');

@@ -194,8 +194,14 @@ export const api = {
       },
       clearLogo: (variant: 'light' | 'dark') =>
         fetchJson<{ ok: true }>(`/agent/style-sheet/logo/${variant}`, { method: 'DELETE' }),
-      /** Browser-addressable URL that streams the logo file inline (for <img> previews). */
-      logoPreviewUrl: (fileId: string) => `${BASE}/drive/entry/${fileId}/download?inline=1`,
+      /** Resolve a <img src> for a stored logo — prefers the inline data URL on new uploads,
+       *  falls back to the legacy Drive-download route for rows uploaded before the switch. */
+      logoPreviewSrc: (logo: JeffLogoRef | null | undefined): string | null => {
+        if (!logo) return null;
+        if (logo.dataUrl) return logo.dataUrl;
+        if (logo.fileId) return `${BASE}/drive/entry/${logo.fileId}/download?inline=1`;
+        return null;
+      },
     },
     competitors: {
       list: () => fetchJson<JeffCompetitor[]>('/agent/competitors'),
@@ -369,7 +375,11 @@ export interface JeffToolCall {
 }
 
 export interface JeffLogoRef {
-  fileId: string;
+  /** Base64 data URL — used for display in the browser and embedded directly into
+   *  PDF / PPTX output. New uploads always land here. */
+  dataUrl?: string;
+  /** Legacy: Drive file id from the old logo-upload flow. Kept optional for back-compat. */
+  fileId?: string;
   name: string;
   mimeType: string;
 }

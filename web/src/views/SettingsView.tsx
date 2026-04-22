@@ -1378,15 +1378,18 @@ function LogoTile(props: {
         minHeight: 140, display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: props.background, padding: 16,
       }}>
-        {props.logo ? (
-          <img
-            src={api.agent.styleSheet.logoPreviewUrl(props.logo.fileId)}
-            alt={props.logo.name}
-            style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }}
-          />
-        ) : (
-          <div style={{ fontSize: 12, color: props.background === '#fff' ? '#8a8e95' : '#c7cbd1' }}>No logo yet</div>
-        )}
+        {(() => {
+          const src = api.agent.styleSheet.logoPreviewSrc(props.logo);
+          return src ? (
+            <img
+              src={src}
+              alt={props.logo!.name}
+              style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }}
+            />
+          ) : (
+            <div style={{ fontSize: 12, color: props.background === '#fff' ? '#8a8e95' : '#c7cbd1' }}>No logo yet</div>
+          );
+        })()}
       </div>
       <div style={{ display: 'flex', gap: 8, padding: 10 }}>
         <input

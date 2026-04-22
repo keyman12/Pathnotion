@@ -64,21 +64,32 @@ function firstGoogleTokens(): GoogleTokens | null {
   };
 }
 
-async function loadLogoBytes(fileId: string | undefined): Promise<Buffer | null> {
-  if (!fileId) return null;
-  const tokens = firstGoogleTokens();
-  if (!tokens) return null;
-  try {
-    const entry = await getEntry(tokens, fileId);
-    if (!entry) return null;
-    const content = await fetchFileContent(tokens, entry, { maxBytes: 2 * 1024 * 1024 });
-    if (!content || content.kind !== 'binary') return null;
-    // Strip near-white pixels so the logo blends onto the grey header / any backdrop.
-    try { return await stripNearWhite(content.data); }
-    catch { return content.data; }
-  } catch {
-    return null;
+async function loadLogoBytes(logo: { dataUrl?: string; fileId?: string } | null | undefined): Promise<Buffer | null> {
+  if (!logo) return null;
+  // New path: base64 data URL stored inline on the style sheet. No external fetch needed.
+  if (logo.dataUrl) {
+    const m = /^data:[^;]+;base64,(.+)$/.exec(logo.dataUrl);
+    if (!m) return null;
+    const bytes = Buffer.from(m[1], 'base64');
+    try { return await stripNearWhite(bytes); }
+    catch { return bytes; }
   }
+  // Back-compat: legacy entries stored a Drive file id — fetch and strip as before.
+  if (logo.fileId) {
+    const tokens = firstGoogleTokens();
+    if (!tokens) return null;
+    try {
+      const entry = await getEntry(tokens, logo.fileId);
+      if (!entry) return null;
+      const content = await fetchFileContent(tokens, entry, { maxBytes: 2 * 1024 * 1024 });
+      if (!content || content.kind !== 'binary') return null;
+      try { return await stripNearWhite(content.data); }
+      catch { return content.data; }
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 async function loadDriveImage(fileId: string): Promise<Buffer | null> {
@@ -117,7 +128,7 @@ export async function renderProductPdf(input: ProductPdfInput): Promise<Rendered
   const cWhite        = '#FFFFFF';
 
   // Load light logo for the header. Missing → header still renders, just without a logo.
-  const logoBuffer = await loadLogoBytes(brand.logoLight?.fileId);
+  const logoBuffer = await loadLogoBytes(brand.logoLight ?? null);
 
   const mod: any = await import('pdfkit');
   const PDFDocument: typeof PDFKitType = mod.default?.default ?? mod.default ?? mod;

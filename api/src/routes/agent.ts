@@ -17,32 +17,15 @@ import {
   type MemoryKind,
 } from '../services/jeff.js';
 import { runJobNow } from '../services/jeff-scheduler.js';
-import { decryptToken } from '../services/token-vault.js';
-import { ensureJeffFolder, uploadFile } from '../services/google-drive.js';
-import { type GoogleTokens } from '../services/google-calendar.js';
-
 export const agentRouter = Router();
 
-// 5MB is enough for any logo. Bigger uploads belong in Drive directly.
+// 5MB is enough for any logo. Bigger images belong directly in Drive via the regular upload.
 const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function requireUserKey(req: any): string {
   const key = req.session?.userKey;
   if (!key) throw Object.assign(new Error('Not authenticated'), { status: 401 });
   return key;
-}
-
-function loadGoogleTokens(userKey: string): GoogleTokens {
-  const row = db.prepare(
-    "SELECT access_token, refresh_token, token_expiry, scope FROM calendar_sources WHERE user_key = ? AND provider = 'google' LIMIT 1",
-  ).get(userKey) as { access_token: string | null; refresh_token: string | null; token_expiry: number | null; scope: string | null } | undefined;
-  if (!row) throw Object.assign(new Error('Google not connected'), { status: 404 });
-  return {
-    access_token: decryptToken(row.access_token),
-    refresh_token: decryptToken(row.refresh_token),
-    expiry_date: row.token_expiry ?? null,
-    scope: row.scope,
-  };
 }
 
 function loadStyleSheetData(): Record<string, any> {
@@ -309,8 +292,9 @@ agentRouter.put('/style-sheet', (req, res) => {
   res.json({ ok: true });
 });
 
-// Upload a logo (light or dark variant) to the Jeff Drive folder and store the file reference
-// on the style sheet. The file itself lives in Drive so it can be embedded in generated decks / PDFs.
+// Upload a logo (light or dark variant). Stores the file as a base64 data URL inside the
+// style-sheet JSON — no Google Drive required, works on fresh installs, and the nightly DB
+// backup covers it automatically. The renderers (PDF / PPTX) read the data URL directly.
 agentRouter.post('/style-sheet/logo/:variant', logoUpload.single('file'), async (req, res) => {
   try {
     const variant = req.params.variant;
@@ -324,32 +308,21 @@ agentRouter.post('/style-sheet/logo/:variant', logoUpload.single('file'), async 
       return res.status(400).json({ error: 'Logo must be an image.' });
     }
 
-    const cfg = db.prepare('SELECT drive_id AS driveId FROM workspace_config WHERE id = 1').get() as
-      | { driveId: string | null } | undefined;
-    if (!cfg?.driveId) return res.status(400).json({ error: 'No shared drive chosen yet. Pick one in Settings → Google first.' });
-
-    const tokens = loadGoogleTokens(userKey);
-    const jeffFolder = await ensureJeffFolder(tokens, cfg.driveId);
-    const entry = await uploadFile(tokens, {
-      parentId: jeffFolder.id,
-      name: `Path logo — ${variant} — ${file.originalname}`,
-      mimeType: file.mimetype,
-      data: file.buffer,
-    });
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const logo = { dataUrl, name: file.originalname, mimeType: file.mimetype };
 
     const style = loadStyleSheetData();
     style.brand = style.brand ?? {};
-    const key = variant === 'light' ? 'logoLight' : 'logoDark';
-    style.brand[key] = { fileId: entry.id, name: entry.name, mimeType: file.mimetype };
+    style.brand[variant === 'light' ? 'logoLight' : 'logoDark'] = logo;
     saveStyleSheetData(style, userKey);
 
-    res.status(201).json({ variant, logo: style.brand[key] });
+    return res.status(201).json({ variant, logo });
   } catch (err: any) {
-    res.status(err.status ?? 500).json({ error: err.message ?? 'Upload failed' });
+    return res.status(err.status ?? 500).json({ error: err.message ?? 'Upload failed' });
   }
 });
 
-// Clear a logo reference. Does not delete the file in Drive — the user can still find it there.
+// Clear a logo reference. Just removes the dataUrl from the style sheet.
 agentRouter.delete('/style-sheet/logo/:variant', (req, res) => {
   try {
     const variant = req.params.variant;
