@@ -1,8 +1,8 @@
 // Let .env win over the parent shell. Some environments (Claude Code, some CI runners)
 // pre-set ANTHROPIC_API_KEY to an empty string as a safety measure — without `override`
 // dotenv silently leaves those empties in place and Jeff sees "key not set".
-import dotenv from 'dotenv';
-dotenv.config({ override: true });
+// MUST be the first import — see bootstrap.ts for why.
+import './bootstrap.js';
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
