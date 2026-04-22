@@ -564,6 +564,7 @@ function NewEventDialog({ me, onClose, onCreate }: {
   // Default to today, 10:00 → 11:00, in the user's local timezone.
   const todayIso = new Date().toISOString().slice(0, 10);
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [who, setWho] = useState<'D' | 'R' | 'SHARED'>(me);
   const [date, setDate] = useState(todayIso);
   const [start, setStart] = useState('10:00');
@@ -593,6 +594,7 @@ function NewEventDialog({ me, onClose, onCreate }: {
       kind: 'meet',
       startIso: isoFor(date, start),
       endIso: isoFor(date, end),
+      description: description.trim() || null,
     });
   };
 
@@ -665,6 +667,17 @@ function NewEventDialog({ me, onClose, onCreate }: {
           </Field>
         </div>
 
+        <Field label="Description">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Agenda, links, context…"
+            className="input"
+            rows={3}
+            style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', minHeight: 60 }}
+          />
+        </Field>
+
         <Field label="Owner">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6 }}>
             {(['D', 'R', 'SHARED'] as const).map((k) => (
@@ -732,6 +745,23 @@ function EventDetail({ event, onClose, onDelete }: { event: CalendarEvent; onClo
         <div style={{ fontSize: 12, color: 'var(--fg-3)' }}>
           {event.who === 'SHARED' ? 'Shared' : event.who === 'D' ? 'Dave' : 'Raj'} · {event.kind ?? 'meet'}
         </div>
+        {event.location && (
+          <div style={{ fontSize: 12.5, color: 'var(--fg-2)', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Icon name="pin" size={11} /> {event.location}
+          </div>
+        )}
+        {event.description && (
+          <div style={{
+            fontSize: 12.5, color: 'var(--fg-2)',
+            lineHeight: 1.5, whiteSpace: 'pre-wrap',
+            padding: '10px 12px',
+            background: 'var(--bg-sunken)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 6,
+          }}>
+            {event.description}
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
           <button className="btn btn-subtle" style={{ color: 'var(--danger-fg)' }} onClick={() => { if (confirm('Delete this event?')) onDelete(); }}>
@@ -767,8 +797,10 @@ function DayGrid({ date, events, onEventClick }: {
     end:   hourOf(e.endIso ?? e.startIso!),
   })).sort((a, b) => a.start - b.start), [events, date]);
 
+  // Cap the column width so a single day doesn't stretch across a huge display. The week
+  // view needs the full grid because it's five columns, but one column looks silly at 2k+.
   return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ maxWidth: 780, margin: '0 auto', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-sunken)' }}>
         <div />
         <div style={{ padding: '12px 16px', borderLeft: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'baseline', gap: 10 }}>
