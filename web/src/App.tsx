@@ -39,8 +39,13 @@ export function App() {
   const openSearch = useUI((s) => s.openSearch);
   const isMobile = useIsMobile();
   const session = useSession();
-  // Prototype is pinned to Mon 13 Apr 2026 · 10:42 London time · Week 16. Hold that anchor until real auth + real calendars replace the seed.
-  const [now] = useState(() => new Date('2026-04-13T10:42:00+01:00'));
+  // Real clock. VITE_PIN_NOW overrides for screenshot / demo sessions — when set to an ISO
+  // string the app pretends "now" is that moment, handy for walking stakeholders through a
+  // live-looking workspace. Leave it unset in prod.
+  const [now] = useState(() => {
+    const pin = (import.meta as any).env?.VITE_PIN_NOW;
+    return pin ? new Date(pin) : new Date();
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
