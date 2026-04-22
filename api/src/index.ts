@@ -33,6 +33,11 @@ const isProd = process.env.NODE_ENV === 'production';
 // In dev Vite runs on 5173 and needs cross-origin with credentials. In prod nginx proxies both
 // /api/* and the static bundle from one hostname, so there's no cross-origin and no CORS needed.
 const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:5173';
+// Session cookie Secure flag. Defaults to on in prod, but LAN-only HTTP deployments (the Pi)
+// need to force it off or the browser silently drops the cookie.
+const cookieSecure = process.env.COOKIE_SECURE
+  ? process.env.COOKIE_SECURE === 'true'
+  : isProd;
 
 app.set('trust proxy', 1);
 if (!isProd) {
@@ -48,7 +53,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: isProd,
+    secure: cookieSecure,
     sameSite: 'lax',
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   },
