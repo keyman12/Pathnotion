@@ -37,7 +37,7 @@ export function WeekView({ now }: { now: Date }) {
   // Surface anything that's overdue, due today/tomorrow, or coming up in the next 7 days.
   // Tolerates both ISO YYYY-MM-DD (modern) and the legacy "today"/"tomorrow" free-form strings.
   const tasksToday = tasks.filter((t) => !t.done && isTaskNearDue(t.due, now));
-  const todayEvents = events.filter((e) => e.day === 0).sort((a, b) => a.start - b.start);
+  const todayEvents = events.filter((e) => isEventToday(e, now)).sort((a, b) => a.start - b.start);
   const recentDocs = PRODUCT_DOCS.filter((d) => d.updated.includes('today') || d.updated.includes('yesterday')).slice(0, 3);
 
   const meta = now
@@ -171,9 +171,24 @@ function Section({ title, sub, actionLabel, onAction, children }: {
 }
 
 function TodayRow({ event, last }: { event: CalendarEvent; last: boolean }) {
-  const time = `${String(Math.floor(event.start)).padStart(2, '0')}:${event.start % 1 ? '30' : '00'}`;
+  // Prefer the real ISO time on synced events; fall back to the legacy fractional-hour
+  // field so seed events still render. All-day events show "All day" in place of a clock time.
+  let time: string;
+  let durationMin: number;
+  if (event.allDay) {
+    time = 'all day';
+    durationMin = 0;
+  } else if (event.startIso) {
+    const d = new Date(event.startIso);
+    time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const end = event.endIso ? new Date(event.endIso) : null;
+    durationMin = end ? Math.max(0, Math.round((end.getTime() - d.getTime()) / 60000)) : Math.round((event.end - event.start) * 60);
+  } else {
+    time = `${String(Math.floor(event.start)).padStart(2, '0')}:${event.start % 1 ? '30' : '00'}`;
+    durationMin = Math.round((event.end - event.start) * 60);
+  }
   const accent = event.who === 'SHARED' ? 'var(--fg-1)' : event.who === 'D' ? 'var(--path-primary-light-2)' : '#3B82F6';
-  const subtitle = `${event.who === 'SHARED' ? 'Shared' : event.who === 'D' ? 'Dave' : 'Raj'} · ${Math.round((event.end - event.start) * 60)}m`;
+  const subtitle = `${event.who === 'SHARED' ? 'Shared' : event.who === 'D' ? 'Dave' : 'Raj'}${durationMin ? ` · ${durationMin}m` : ''}`;
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 14,
@@ -309,6 +324,24 @@ function formatWeeklyAgo(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+/** Is this calendar event on today's date? Handles both real synced events (startIso set,
+ *  Mon=0..Sun=6 day_of_week from sync) and legacy seed events (day_of_week relative to
+ *  the original pinned Monday). When startIso is present we trust it directly. */
+function isEventToday(e: CalendarEvent, now: Date): boolean {
+  if (e.startIso) {
+    const d = new Date(e.startIso);
+    if (!Number.isNaN(d.getTime())) {
+      return d.getFullYear() === now.getFullYear()
+        && d.getMonth() === now.getMonth()
+        && d.getDate() === now.getDate();
+    }
+  }
+  // Legacy fallback: e.day uses Mon=0..Sun=6 (calendar-sync convention). JS Date.getDay
+  // returns Sun=0..Sat=6 — convert to match.
+  const todayDow = (now.getDay() + 6) % 7;
+  return e.day === todayDow;
 }
 
 /** Render a task's due into a short human label + tone, normalising both ISO dates and
