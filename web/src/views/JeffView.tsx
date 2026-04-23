@@ -125,8 +125,22 @@ function ChatTab() {
   // the user makes a deliberate choice each time — Opus is slower and pricier.
   const [deep, setDeep] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
   const jeffPrefill = useUI((s) => s.jeffPrefill);
   const clearJeffPrefill = useUI((s) => s.clearJeffPrefill);
+
+  // Auto-grow the textarea to fit its content, capped at ~12 lines so it never
+  // takes over the chat column. Reset to 'auto' first so the height shrinks when
+  // text is deleted or after a send. Triggered on every draft change, so paste
+  // (which fires onChange) is handled the same as typing.
+  const TA_MIN = 34;
+  const TA_MAX = 240;
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(Math.max(ta.scrollHeight, TA_MIN), TA_MAX)}px`;
+  }, [draft]);
 
   // Another view ("Ask Jeff") dropped a prompt in the store — pull it into the draft once, then clear it.
   useEffect(() => {
@@ -208,9 +222,11 @@ function ChatTab() {
           {pendingUser && <ChatBubble from="D" text={pendingUser} />}
           {send.isPending && <ChatBubble from="A" text="Thinking…" typing />}
         </div>
-        {/* Input row — textarea auto-grows a little for multi-line but starts at button height. */}
-        <div style={{ borderTop: '1px solid var(--border-subtle)', padding: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+        {/* Input row — textarea auto-grows with content (incl. paste). Buttons stay anchored
+            to the bottom so they don't drift up as the textarea grows. */}
+        <div style={{ borderTop: '1px solid var(--border-subtle)', padding: 10, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <textarea
+            ref={taRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }}
@@ -219,8 +235,8 @@ function ChatTab() {
             style={{
               flex: 1,
               resize: 'none',
-              height: 34,
-              maxHeight: 120,
+              minHeight: TA_MIN,
+              maxHeight: TA_MAX,
               border: '1px solid var(--border-default)',
               borderRadius: 6,
               padding: '7px 10px',
@@ -231,6 +247,7 @@ function ChatTab() {
               background: 'var(--bg-surface)',
               color: 'var(--fg-1)',
               boxSizing: 'border-box',
+              overflowY: 'auto',
             }}
           />
           {/* Per-message Opus toggle. Filled green when on; ghost when off. Single-shot —
