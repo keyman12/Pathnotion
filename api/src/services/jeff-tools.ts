@@ -453,7 +453,7 @@ register({
 
 register({
   name: 'make_presentation',
-  description: "Produce a branded PowerPoint deck in Path's house style and save it to the Jeff folder in Drive. Use when asked to make a deck, slides, presentation, briefing, pitch or similar. A title slide is added automatically — provide ONLY the content slides. Each slide needs a heading; bullets are optional but keep them tight (sentence fragments, ≤8 per slide). Returns the Drive file id and a link the founders can open.",
+  description: "Produce a branded PowerPoint deck in Path's house style and save it to the Jeff folder in Drive. Use when asked to make a deck, slides, presentation, briefing, pitch or similar. A title slide is added automatically — provide ONLY the content slides. Each slide needs a heading; bullets are optional but keep them tight (sentence fragments, ≤8 per slide). Slides can also carry a `diagram` block (flow / pyramid / shapes) which renders as native editable PowerPoint shapes — use this instead of bullets when the content is structurally visual (process flows, hierarchies, four-party model, org charts). Returns the Drive file id and a link the founders can open.",
   input_schema: {
     type: 'object',
     properties: {
@@ -467,7 +467,69 @@ register({
           properties: {
             heading:  { type: 'string', description: 'Slide heading. One short line.' },
             subtitle: { type: 'string', description: 'Optional second line under the heading.' },
-            bullets:  { type: 'array', items: { type: 'string' }, description: 'Bullet points for this slide. Sentence fragments, not paragraphs.' },
+            bullets:  { type: 'array', items: { type: 'string' }, description: 'Bullet points for this slide. Sentence fragments, not paragraphs. Ignored when `diagram` is set.' },
+            diagram: {
+              type: 'object',
+              description: 'Optional native vector diagram for this slide. When set, replaces the bullets area. All shapes are editable in PowerPoint after the deck opens.',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['flow', 'pyramid', 'shapes'],
+                  description: "Diagram type. 'flow' = N labelled boxes connected by arrows (use for processes, pipelines, value chains, the payments four-party model as a horizontal flow). 'pyramid' = stacked levels narrow→wide (use for hierarchies, market segments). 'shapes' = free-form boxes with positions and connectors (use when neither preset fits — org charts, two-sided markets, anything with crossing arrows).",
+                },
+                nodes: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: "For type='flow' only: the boxes in order. e.g. ['Merchant','Acquirer','Scheme','Issuer'].",
+                },
+                orientation: {
+                  type: 'string',
+                  enum: ['horizontal', 'vertical'],
+                  description: "For type='flow' only. Default 'horizontal'.",
+                },
+                levels: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: "For type='pyramid' only: levels listed narrow → wide. e.g. ['Enterprise','Mid-market','SMB'].",
+                },
+                invert: {
+                  type: 'boolean',
+                  description: "For type='pyramid' only. Default false (narrow at top, wide at bottom). Set true to put the wide level at the top (e.g. funnel).",
+                },
+                shapes: {
+                  type: 'array',
+                  description: "For type='shapes' only: explicit boxes. Coordinates are inches inside a 10.6 wide × 4.8 tall content area, top-left origin.",
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id:    { type: 'string', description: 'Unique id for this box; referenced by connectors.' },
+                      label: { type: 'string', description: 'Text shown inside the box.' },
+                      x:     { type: 'number', description: '0..10 — left edge in inches.' },
+                      y:     { type: 'number', description: '0..4.5 — top edge in inches.' },
+                      w:     { type: 'number', description: 'Width in inches. Default 1.8.' },
+                      h:     { type: 'number', description: 'Height in inches. Default 1.0.' },
+                      shape: { type: 'string', enum: ['rect', 'roundRect', 'ellipse', 'diamond'], description: 'Default roundRect.' },
+                      tone:  { type: 'string', enum: ['primary', 'secondary', 'neutral'], description: 'Visual emphasis. primary = brand green (default), secondary = brand red, neutral = grey.' },
+                    },
+                    required: ['id', 'label', 'x', 'y'],
+                  },
+                },
+                connectors: {
+                  type: 'array',
+                  description: "For type='shapes' only: arrows between shapes by id.",
+                  items: {
+                    type: 'object',
+                    properties: {
+                      from:  { type: 'string', description: 'Source shape id.' },
+                      to:    { type: 'string', description: 'Target shape id.' },
+                      label: { type: 'string', description: 'Optional caption shown at the midpoint of the arrow.' },
+                    },
+                    required: ['from', 'to'],
+                  },
+                },
+              },
+              required: ['type'],
+            },
           },
           required: ['heading'],
         },
@@ -486,6 +548,7 @@ register({
         heading:  String(s.heading),
         subtitle: s.subtitle ? String(s.subtitle) : undefined,
         bullets:  Array.isArray(s.bullets) ? s.bullets.map((b: any) => String(b)) : [],
+        diagram:  s.diagram && typeof s.diagram === 'object' ? s.diagram : undefined,
       })),
     });
     const saved = await saveToJeffDesk({
