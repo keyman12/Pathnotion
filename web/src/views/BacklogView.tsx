@@ -829,7 +829,13 @@ function NewItemDialog({ defaultProduct, defaultOwner, products, existingIds, sa
           />
         </Row2>
         <Row2 label="Due">
-          <input value={due} onChange={(e) => setDue(e.target.value)} className="input" style={{ width: 200, height: 32 }} placeholder="e.g. 22 Apr 2026" />
+          <input
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+            className="input"
+            style={{ width: 200, height: 32, colorScheme: 'inherit' }}
+          />
         </Row2>
         <Row2 label="Notes">
           <textarea value={note} onChange={(e) => setNote(e.target.value)} className="input" style={{ width: '100%', minHeight: 60, padding: '8px 10px', fontSize: 13, resize: 'vertical' }} />
