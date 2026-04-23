@@ -21,7 +21,12 @@ import { ensureJeffFolder, ensureJeffSubfolder, fetchFileContent, uploadFile, wa
 
 /** Latest Sonnet. Upgrade this single constant when Anthropic publishes a newer model id. */
 export const JEFF_MODEL = process.env.JEFF_MODEL ?? 'claude-sonnet-4-5';
-const MAX_OUTPUT_TOKENS = 1024;
+/** Default per-turn output cap for chat. Long enough that normal answers never get clipped,
+ *  short enough that a runaway response can't burn dollars. Producing jobs (competitor watch,
+ *  daily news, research refresh) override this to MAX_OUTPUT_TOKENS_LONG so a 16-competitor
+ *  report can actually fit in one turn. */
+const MAX_OUTPUT_TOKENS_CHAT = 4096;
+const MAX_OUTPUT_TOKENS_LONG = 16384;
 const MAX_MEMORIES_IN_PROMPT = 20;
 
 function apiKey(): string | null {
@@ -245,6 +250,9 @@ export async function askJeff(opts: {
   history?: ChatTurn[];
   message: string;
   maxSteps?: number;
+  /** Per-turn output token cap. Defaults to the chat-friendly limit; producing jobs that
+   *  emit long structured reports should bump this to MAX_OUTPUT_TOKENS_LONG. */
+  maxTokens?: number;
   /** Optional AbortSignal — when triggered, the in-flight Anthropic request rejects
    *  with an AbortError. Used by the scheduler so a user can cancel a running job. */
   signal?: AbortSignal;
@@ -269,7 +277,7 @@ export async function askJeff(opts: {
     if (opts.signal?.aborted) throw new Error('aborted');
     const response = await c.messages.create({
       model: JEFF_MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS_CHAT,
       system,
       messages,
       tools,
@@ -587,7 +595,7 @@ export async function runWeeklySummary(opts: { jobId?: string | null; signal?: A
   const userMessage = `Open tasks:\n${ctx.taskList}\n\nBacklog (now + next):\n${ctx.backlogList}\n\nUpcoming events:\n${ctx.upcomingEvents}\n\nRecent memory:\n${ctx.memorySnippets}`;
   const res = await c.messages.create({
     model: JEFF_MODEL,
-    max_tokens: 1200,
+    max_tokens: MAX_OUTPUT_TOKENS_LONG,
     system: getJobPrompt(opts.jobId ?? null, 'weekly-summary'),
     messages: [{ role: 'user', content: userMessage }],
   }, { signal: opts.signal });
@@ -745,7 +753,7 @@ async function runDailyNews(opts: { jobId?: string | null; signal?: AbortSignal 
   const message = instruction
     .replaceAll('{competitors}', names)
     .replaceAll('{today}', today);
-  const result = await askJeff({ message, signal: opts.signal });
+  const result = await askJeff({ message, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   const title = `Daily news — ${today}`;
@@ -788,7 +796,8 @@ async function runCompetitorFeatures(opts: { jobId?: string | null; signal?: Abo
 
   const instruction = getJobPrompt(opts.jobId ?? null, 'competitor-features');
   const message = `${instruction}\n\nCompetitors:\n${list}`;
-  const result = await askJeff({ message, maxSteps: 10, signal: opts.signal });
+  // 16 competitors × 10 categories needs serious headroom on the final report turn.
+  const result = await askJeff({ message, maxSteps: 20, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const afterCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
   const body = stripJeffMonologue(result.text);
 
@@ -843,7 +852,7 @@ async function runResearchRefresh(opts: { jobId?: string | null; signal?: AbortS
   const instruction = getJobPrompt(opts.jobId ?? null, 'research-refresh');
   const message = `${instruction}\n\nCompetitors (all have press pages):\n${list}`;
 
-  const result = await askJeff({ message, maxSteps: rows.length * 2 + 4, signal: opts.signal });
+  const result = await askJeff({ message, maxSteps: rows.length * 2 + 4, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   // Save the narrative as a memory so the Week view / chat can reference today's refresh at a glance.
