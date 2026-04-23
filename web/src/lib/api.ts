@@ -142,8 +142,11 @@ export const api = {
     todayFeed: () => fetchJson<JeffTodayFeed>('/agent/today-feed'),
     conversations: () => fetchJson<AgentConversationMessage[]>('/agent/conversations'),
     clearConversations: () => fetchJson<{ removed: number }>('/agent/conversations', { method: 'DELETE' }),
-    sendMessage: (text: string) =>
-      fetchJson<{ text: string; model: string; toolCalls: JeffToolCall[] }>('/agent/message', { method: 'POST', body: JSON.stringify({ text }) }),
+    sendMessage: (text: string, opts: { deep?: boolean } = {}) =>
+      fetchJson<{ text: string; model: string; toolCalls: JeffToolCall[] }>('/agent/message', {
+        method: 'POST',
+        body: JSON.stringify({ text, deep: opts.deep ?? false }),
+      }),
     runs: () => fetchJson<AgentRun[]>('/agent/runs'),
     schedule: () => fetchJson<AgentJob[]>('/agent/schedule'),
     promptDefaults: () => fetchJson<Record<string, string>>('/agent/schedule/prompt-defaults'),

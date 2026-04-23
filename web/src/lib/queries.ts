@@ -152,7 +152,8 @@ export function useJeffConversation() {
 export function useSendJeffMessage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) => api.agent.sendMessage(text),
+    mutationFn: (args: { text: string; deep?: boolean }) =>
+      api.agent.sendMessage(args.text, { deep: args.deep }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agent', 'conversations'] }),
   });
 }

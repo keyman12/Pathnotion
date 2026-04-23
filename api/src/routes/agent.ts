@@ -6,6 +6,7 @@ import {
   askJeff,
   clearMemories,
   countMemories,
+  JEFF_MODEL_REPORT,
   JOB_PROMPT_DEFAULTS,
   jeffStatus,
   listMemories,
@@ -106,7 +107,13 @@ agentRouter.delete('/conversations', (_req, res) => {
   res.json({ removed: r.changes });
 });
 
-const messageSchema = z.object({ text: z.string().min(1).max(4000) });
+const messageSchema = z.object({
+  text: z.string().min(1).max(4000),
+  // Per-message opt-in to the report-tier model (Opus). Useful for one-off complex
+  // requests like "build me a deck on X" where the chat-tier model is too light.
+  // Resets after each send — the UI doesn't keep the toggle on between messages.
+  deep: z.boolean().optional(),
+});
 
 // Real chat endpoint. Non-streaming for now — we can swap to streaming later if the wait feels long.
 agentRouter.post('/message', async (req, res) => {
@@ -128,7 +135,12 @@ agentRouter.post('/message', async (req, res) => {
     .filter((x): x is ChatTurn => x !== null);
 
   try {
-    const result = await askJeff({ history, message: parsed.data.text });
+    // Deep mode: route this single turn through the report tier (Opus). Bump max
+    // output tokens to match — Opus on a tight cap is wasted potential.
+    const overrides = parsed.data.deep
+      ? { model: JEFF_MODEL_REPORT, maxTokens: 16384 }
+      : {};
+    const result = await askJeff({ history, message: parsed.data.text, ...overrides });
     // Store the agent reply + any tool calls as the "actions" payload so the UI can show them.
     db.prepare("INSERT INTO agent_messages (role, text, actions) VALUES ('agent', ?, ?)").run(
       result.text,

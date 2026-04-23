@@ -121,6 +121,9 @@ function ChatTab() {
   const clear = useClearJeffConversation();
   const [draft, setDraft] = useState('');
   const [pendingUser, setPendingUser] = useState<string | null>(null);
+  // Per-message opt-in to the report tier (Opus). Resets after each send so
+  // the user makes a deliberate choice each time — Opus is slower and pricier.
+  const [deep, setDeep] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const jeffPrefill = useUI((s) => s.jeffPrefill);
   const clearJeffPrefill = useUI((s) => s.clearJeffPrefill);
@@ -143,10 +146,12 @@ function ChatTab() {
   const onSend = async () => {
     const text = draft.trim();
     if (!text || send.isPending) return;
+    const sentDeep = deep;
     setDraft('');
+    setDeep(false); // single-shot — opt in again per message
     setPendingUser(text);
     try {
-      await send.mutateAsync(text);
+      await send.mutateAsync({ text, deep: sentDeep });
     } catch (err) {
       alert(`Jeff couldn't reply: ${(err as Error).message}`);
     } finally {
@@ -228,6 +233,28 @@ function ChatTab() {
               boxSizing: 'border-box',
             }}
           />
+          {/* Per-message Opus toggle. Filled green when on; ghost when off. Single-shot —
+              clears itself after each send so you opt in deliberately each time. */}
+          <button
+            type="button"
+            onClick={() => setDeep((v) => !v)}
+            title={deep
+              ? 'This message will run on Opus (slower, smarter, pricier). Click to turn off.'
+              : 'Run this message on Opus 4.7 — better for decks, long reports, complex synthesis. Slower and a bit pricier.'}
+            aria-pressed={deep}
+            style={{
+              height: 34, padding: '0 12px',
+              borderRadius: 6, fontSize: 12, fontWeight: 500,
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: deep ? 'var(--path-primary)'    : 'var(--bg-surface)',
+              color:      deep ? 'var(--fg-on-primary)'   : 'var(--fg-2)',
+              border: `1px solid ${deep ? 'var(--path-primary)' : 'var(--border-default)'}`,
+              transition: 'background 120ms, color 120ms, border-color 120ms',
+            }}
+          >
+            <Icon name="sparkle" size={12} /> {deep ? 'Going deep' : 'Go deep'}
+          </button>
           <button
             className="btn btn-primary"
             onClick={onSend}
