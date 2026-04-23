@@ -19,8 +19,18 @@ import { ensureJeffFolder, ensureJeffSubfolder, fetchFileContent, uploadFile, wa
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-/** Latest Sonnet. Upgrade this single constant when Anthropic publishes a newer model id. */
-export const JEFF_MODEL = process.env.JEFF_MODEL ?? 'claude-sonnet-4-5';
+// Model selection per workload. Each role can be overridden with its own env var, and
+// a single legacy JEFF_MODEL var still works as a chat fallback for older deployments.
+//   chat   — interactive Q&A with tool use. Latency + tool fluency matter.
+//   scan   — per-doc / per-file summarisation. Many cheap calls, ~200-token outputs.
+//   report — long structured documents (competitor watch, weekly summary, research refresh).
+//            Quality + 16k+ output room matter more than latency or cost.
+export const JEFF_MODEL_CHAT   = process.env.JEFF_MODEL_CHAT   ?? process.env.JEFF_MODEL ?? 'claude-sonnet-4-6';
+export const JEFF_MODEL_SCAN   = process.env.JEFF_MODEL_SCAN   ?? 'claude-haiku-4-5';
+export const JEFF_MODEL_REPORT = process.env.JEFF_MODEL_REPORT ?? 'claude-opus-4-7';
+/** Back-compat alias — anything that imported JEFF_MODEL gets the chat tier. Status endpoint,
+ *  any external code. New code should prefer JEFF_MODEL_CHAT/SCAN/REPORT directly. */
+export const JEFF_MODEL = JEFF_MODEL_CHAT;
 /** Default per-turn output cap for chat. Long enough that normal answers never get clipped,
  *  short enough that a runaway response can't burn dollars. Producing jobs (competitor watch,
  *  daily news, research refresh) override this to MAX_OUTPUT_TOKENS_LONG so a 16-competitor
@@ -39,10 +49,13 @@ function client(): Anthropic {
   return new Anthropic({ apiKey: key });
 }
 
-/** Cheap status check so the UI can show a "Jeff isn't configured" message instead of erroring on send. */
-export function jeffStatus(): { ready: boolean; model: string; reason?: string } {
-  if (!apiKey()) return { ready: false, model: JEFF_MODEL, reason: 'ANTHROPIC_API_KEY not set' };
-  return { ready: true, model: JEFF_MODEL };
+/** Cheap status check so the UI can show a "Jeff isn't configured" message instead of erroring on send.
+ *  `model` is the chat-tier model (what the founders interact with directly); `models` exposes the
+ *  full per-workload split so the UI can render it if it wants. */
+export function jeffStatus(): { ready: boolean; model: string; models: { chat: string; scan: string; report: string }; reason?: string } {
+  const models = { chat: JEFF_MODEL_CHAT, scan: JEFF_MODEL_SCAN, report: JEFF_MODEL_REPORT };
+  if (!apiKey()) return { ready: false, model: JEFF_MODEL_CHAT, models, reason: 'ANTHROPIC_API_KEY not set' };
+  return { ready: true, model: JEFF_MODEL_CHAT, models };
 }
 
 // ─── Job prompt registry ────────────────────────────────────────────────────
@@ -253,6 +266,9 @@ export async function askJeff(opts: {
   /** Per-turn output token cap. Defaults to the chat-friendly limit; producing jobs that
    *  emit long structured reports should bump this to MAX_OUTPUT_TOKENS_LONG. */
   maxTokens?: number;
+  /** Override the model for this call. Defaults to the chat tier; report runners
+   *  (competitor watch, research refresh, daily news) pass JEFF_MODEL_REPORT. */
+  model?: string;
   /** Optional AbortSignal — when triggered, the in-flight Anthropic request rejects
    *  with an AbortError. Used by the scheduler so a user can cancel a running job. */
   signal?: AbortSignal;
@@ -261,6 +277,7 @@ export async function askJeff(opts: {
   const { allTools, runTool } = await import('./jeff-tools.js');
   const c = client();
   const system = buildSystemPrompt();
+  const model = opts.model ?? JEFF_MODEL_CHAT;
 
   type Msg = { role: 'user' | 'assistant'; content: any };
   const history = opts.history ?? [];
@@ -276,7 +293,7 @@ export async function askJeff(opts: {
   for (let step = 0; step < maxSteps; step++) {
     if (opts.signal?.aborted) throw new Error('aborted');
     const response = await c.messages.create({
-      model: JEFF_MODEL,
+      model,
       max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS_CHAT,
       system,
       messages,
@@ -313,7 +330,7 @@ export async function askJeff(opts: {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return { text: text || '(Jeff returned an empty reply.)', model: JEFF_MODEL, toolCalls };
+  return { text: text || '(Jeff returned an empty reply.)', model, toolCalls };
 }
 
 // ─── Article scan — populate memory from PathNotion articles ────────────────
@@ -352,7 +369,7 @@ async function summariseText(title: string, body: string, scope: string | null, 
   const c = client();
   const scopeHint = scope && scope !== 'product' ? ` (scope: ${scope})` : '';
   const res = await c.messages.create({
-    model: JEFF_MODEL,
+    model: JEFF_MODEL_SCAN,
     max_tokens: 200,
     system: systemPrompt,
     messages: [{
@@ -430,7 +447,7 @@ async function summariseFileContent(
     const trimmed = (content.text ?? '').trim();
     if (!trimmed) return `(empty) ${entry.name}`;
     const res = await c.messages.create({
-      model: JEFF_MODEL,
+      model: JEFF_MODEL_SCAN,
       max_tokens: 220,
       system,
       messages: [{ role: 'user', content: `File: ${entry.name}\nType: ${entry.mimeType}\n\n${trimmed}` }],
@@ -445,7 +462,7 @@ async function summariseFileContent(
     : { type: 'image',    source: { type: 'base64', media_type: content.mediaType,   data: base64 } };
 
   const res = await c.messages.create({
-    model: JEFF_MODEL,
+    model: JEFF_MODEL_SCAN,
     max_tokens: 220,
     system,
     messages: [{
@@ -594,7 +611,7 @@ export async function runWeeklySummary(opts: { jobId?: string | null; signal?: A
   const ctx = buildWeeklyContext();
   const userMessage = `Open tasks:\n${ctx.taskList}\n\nBacklog (now + next):\n${ctx.backlogList}\n\nUpcoming events:\n${ctx.upcomingEvents}\n\nRecent memory:\n${ctx.memorySnippets}`;
   const res = await c.messages.create({
-    model: JEFF_MODEL,
+    model: JEFF_MODEL_REPORT,
     max_tokens: MAX_OUTPUT_TOKENS_LONG,
     system: getJobPrompt(opts.jobId ?? null, 'weekly-summary'),
     messages: [{ role: 'user', content: userMessage }],
@@ -753,7 +770,7 @@ async function runDailyNews(opts: { jobId?: string | null; signal?: AbortSignal 
   const message = instruction
     .replaceAll('{competitors}', names)
     .replaceAll('{today}', today);
-  const result = await askJeff({ message, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
+  const result = await askJeff({ message, model: JEFF_MODEL_REPORT, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   const title = `Daily news — ${today}`;
@@ -797,7 +814,7 @@ async function runCompetitorFeatures(opts: { jobId?: string | null; signal?: Abo
   const instruction = getJobPrompt(opts.jobId ?? null, 'competitor-features');
   const message = `${instruction}\n\nCompetitors:\n${list}`;
   // 16 competitors × 10 categories needs serious headroom on the final report turn.
-  const result = await askJeff({ message, maxSteps: 20, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
+  const result = await askJeff({ message, model: JEFF_MODEL_REPORT, maxSteps: 20, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const afterCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_tracked_features').get() as { n: number }).n;
   const body = stripJeffMonologue(result.text);
 
@@ -852,7 +869,7 @@ async function runResearchRefresh(opts: { jobId?: string | null; signal?: AbortS
   const instruction = getJobPrompt(opts.jobId ?? null, 'research-refresh');
   const message = `${instruction}\n\nCompetitors (all have press pages):\n${list}`;
 
-  const result = await askJeff({ message, maxSteps: rows.length * 2 + 4, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
+  const result = await askJeff({ message, model: JEFF_MODEL_REPORT, maxSteps: rows.length * 2 + 4, maxTokens: MAX_OUTPUT_TOKENS_LONG, signal: opts.signal });
   const body = stripJeffMonologue(result.text);
 
   // Save the narrative as a memory so the Week view / chat can reference today's refresh at a glance.
