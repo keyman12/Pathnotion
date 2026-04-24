@@ -658,6 +658,9 @@ function MiddlePane({ mode, driveName, driveId, parentId, virtualView, isAtRoot,
   const inVirtual = virtualView === 'articles';
   const childrenQ = useDriveChildren(parentId, undefined, !inVirtual);
   const articlesQ = useArticlesInFolder(inVirtual ? '__all__' : parentId);
+  // Layout switcher for the All-articles view — grid (prototype card layout) or list
+  // (compact table). Persists across navigation within this MiddlePane mount.
+  const [articleLayout, setArticleLayout] = useState<'grid' | 'list'>('grid');
   const selectedEntryQ = useDriveEntry(selectedFileId);
   const entries = childrenQ.data ?? [];
   // Each mode only shows articles that live in its root. Product docs stay separate from
@@ -736,6 +739,26 @@ function MiddlePane({ mode, driveName, driveId, parentId, virtualView, isAtRoot,
             style={{ border: 0, outline: 'none', background: 'transparent', fontSize: 12.5, color: 'var(--fg-1)', width: '100%' }}
           />
         </div>
+        {inVirtual && (
+          <div style={{ display: 'inline-flex', height: 30, border: '1px solid var(--border-default)', borderRadius: 6, padding: 2, background: 'var(--bg-surface)' }}>
+            {(['grid', 'list'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setArticleLayout(v)}
+                title={v === 'grid' ? 'Grid view' : 'List view'}
+                style={{
+                  border: 0, cursor: 'pointer',
+                  padding: '0 8px', borderRadius: 4,
+                  background: articleLayout === v ? 'var(--bg-sunken)' : 'transparent',
+                  color: articleLayout === v ? 'var(--fg-1)' : 'var(--fg-3)',
+                  display: 'flex', alignItems: 'center',
+                }}
+              >
+                <Icon name={v === 'grid' ? 'grid' : 'list'} size={13} />
+              </button>
+            ))}
+          </div>
+        )}
         <button
           className="btn btn-ghost"
           title={inVirtual ? 'Open a folder to create sub-folders there' : 'Create a sub-folder here'}
@@ -820,6 +843,7 @@ function MiddlePane({ mode, driveName, driveId, parentId, virtualView, isAtRoot,
             articles={matchedArticles}
             selectedArticleId={selectedArticleId}
             onOpenArticle={onOpenArticle}
+            layout={articleLayout}
           />
         )}
         {!inVirtual && (files.length > 0 || matchedArticles.length > 0) && (
@@ -933,10 +957,11 @@ function useTagResolver() {
 
 // ─── All-articles virtual view (grouped by tag) ────────────────────────────
 
-function ArticlesByTag({ articles, selectedArticleId, onOpenArticle }: {
+function ArticlesByTag({ articles, selectedArticleId, onOpenArticle, layout }: {
   articles: DocSummary[];
   selectedArticleId: string | null;
   onOpenArticle: (id: string) => void;
+  layout: 'grid' | 'list';
 }) {
   const resolve = useTagResolver();
 
@@ -967,14 +992,87 @@ function ArticlesByTag({ articles, selectedArticleId, onOpenArticle }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
       {sorted.map(({ tag, items }) => (
-        <ArticleTable
-          key={tag?.key ?? '__untagged__'}
-          tag={tag}
-          articles={items}
-          selectedArticleId={selectedArticleId}
-          onOpenArticle={onOpenArticle}
-        />
+        layout === 'grid'
+          ? <ArticleCardsGroup
+              key={tag?.key ?? '__untagged__'}
+              tag={tag}
+              articles={items}
+              onOpenArticle={onOpenArticle}
+            />
+          : <ArticleTable
+              key={tag?.key ?? '__untagged__'}
+              tag={tag}
+              articles={items}
+              selectedArticleId={selectedArticleId}
+              onOpenArticle={onOpenArticle}
+            />
       ))}
+    </div>
+  );
+}
+
+/** Prototype-style per-tag section: header (colour dot + label + count) on top of a 2-column
+ *  card grid. Each card shows the article icon, title, tag pill, edited age and owner avatar.
+ *  Click a card to open the article in the editor drawer. */
+function ArticleCardsGroup({ tag, articles, onOpenArticle }: {
+  tag: ResolvedTag | null;
+  articles: DocSummary[];
+  onOpenArticle: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="section-h" style={{ alignItems: 'center', marginBottom: 10 }}>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}>
+          {tag
+            ? <><span style={{ width: 8, height: 8, borderRadius: 2, background: tag.color }} /> {tag.label}</>
+            : <><span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--fg-4)' }} /> Untagged</>}
+        </h2>
+        <span className="meta" style={{ fontSize: 10 }}>{articles.length} item{articles.length === 1 ? '' : 's'}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+        {articles.map((a) => <ArticleCard key={a.id} article={a} tag={tag} onOpen={() => onOpenArticle(a.id)} />)}
+      </div>
+    </div>
+  );
+}
+
+function ArticleCard({ article, tag, onOpen }: {
+  article: DocSummary;
+  tag: ResolvedTag | null;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      onClick={onOpen}
+      className="row-hover"
+      title="Open article"
+      style={{
+        padding: '14px 16px',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 8,
+        background: 'var(--bg-surface)',
+        cursor: 'pointer',
+        display: 'flex', alignItems: 'flex-start', gap: 12,
+      }}
+    >
+      <Icon name="docs" size={18} color="var(--fg-3)" style={{ marginTop: 2, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, color: 'var(--fg-1)', fontWeight: 500, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {article.title}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+          {tag && (
+            <span className="tag" style={{ color: tag.color }}>
+              <span className="tag-dot" style={{ background: tag.color }} />
+              {tag.label}
+            </span>
+          )}
+          <span className="meta" style={{ fontSize: 10 }}>
+            {article.updated ? `Edited ${article.updated}` : 'New'}{article.size ? ` · ${article.size}` : ''}
+          </span>
+        </div>
+      </div>
+      <Avatar who={(article.by as FounderKey | 'A') ?? 'D'} size={22} />
     </div>
   );
 }
