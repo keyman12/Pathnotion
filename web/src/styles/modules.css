@@ -142,6 +142,25 @@
   border: 0 !important;
 }
 .doc-prose p { min-height: 1.55em; }
+
+/* Pasted / dropped images. Block, max width of column, slight rounding to feel intentional.
+   The block-handle rail picks them up automatically so users can drag-reorder them. */
+.doc-prose img.doc-image,
+.doc-prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 12px 0;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+}
+/* Selected image — ProseMirror adds .ProseMirror-selectednode when an image node is clicked. */
+.doc-prose img.ProseMirror-selectednode,
+.doc-prose .ProseMirror-selectednode > img {
+  outline: 2px solid var(--path-primary) !important;
+  outline-offset: 2px;
+}
 .doc-prose p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--fg-4);

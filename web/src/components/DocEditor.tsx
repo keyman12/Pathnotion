@@ -13,6 +13,7 @@ import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
+import Image from '@tiptap/extension-image';
 import { Icon } from './Icon';
 import { SlashMenu, type SlashCommand } from './SlashMenu';
 import React from 'react';
@@ -67,6 +68,30 @@ export function DocEditor({ docId, onClose }: Props) {
   // to re-read `editor.isActive(...)` so Bold / block-type highlight stays in sync.
   const [, setTick] = useState(0);
 
+  // Read a pasted/dropped image file as a data URL and insert it as an Image node at the
+  // current selection. Async (FileReader) so we dispatch the transaction once the data URL
+  // is ready. Limit per file to keep doc payload sane — past 6 MB a single screenshot makes
+  // the doc JSON heavy. Larger images get a friendly alert instead.
+  const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+  const insertImageFromFile = useCallback((view: any, file: File) => {
+    if (file.size > MAX_IMAGE_BYTES) {
+      alert(`That image is ${(file.size / 1024 / 1024).toFixed(1)} MB — please use one under ${MAX_IMAGE_BYTES / 1024 / 1024} MB. (We'll move large images to Drive in a future update.)`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = String(reader.result ?? '');
+      if (!src) return;
+      const schema = view.state.schema;
+      const imageType = schema.nodes.image;
+      if (!imageType) return;
+      const node = imageType.create({ src, alt: file.name });
+      view.dispatch(view.state.tr.replaceSelectionWith(node));
+    };
+    reader.onerror = () => alert(`Couldn't read ${file.name}.`);
+    reader.readAsDataURL(file);
+  }, []);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -90,12 +115,44 @@ export function DocEditor({ docId, onClose }: Props) {
       TableRow,
       TableHeader,
       TableCell,
+      // Inline images. The block-handle rail picks these up automatically so the user
+      // can drag the image up or down to reorder it like any other block. Insertion
+      // (paste, drop, slash menu) is handled below in `editorProps.handlePaste/handleDrop`.
+      Image.configure({ inline: false, allowBase64: true, HTMLAttributes: { class: 'doc-image' } }),
       Callout,
       PreservedBlock,
     ],
     content: initialContent ?? undefined,
     editorProps: {
       attributes: { class: 'prose doc-prose' },
+      // Paste handler — intercept clipboard image data (Cmd-V from a screenshot, copied
+      // image from a webpage). For now images are stored as base64 data URLs inside the
+      // doc JSON; works without Drive being connected. If pasted images get heavy on a
+      // doc, we can promote this to a Drive-upload pipeline later.
+      handlePaste: (view, event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        const imageFiles: File[] = [];
+        for (const it of Array.from(items)) {
+          if (it.kind === 'file' && it.type.startsWith('image/')) {
+            const f = it.getAsFile();
+            if (f) imageFiles.push(f);
+          }
+        }
+        if (!imageFiles.length) return false;
+        for (const f of imageFiles) insertImageFromFile(view, f);
+        return true;  // we handled it; don't paste raw bytes as text
+      },
+      // Drag-and-drop image files from Finder / Explorer onto the article.
+      handleDrop: (view, event) => {
+        const files = event.dataTransfer?.files;
+        if (!files || !files.length) return false;
+        const imageFiles = Array.from(files).filter((f) => f.type.startsWith('image/'));
+        if (!imageFiles.length) return false;
+        event.preventDefault();
+        for (const f of imageFiles) insertImageFromFile(view, f);
+        return true;
+      },
     },
     onUpdate: ({ editor: ed }) => {
       scheduleSave(ed.getJSON() as any);

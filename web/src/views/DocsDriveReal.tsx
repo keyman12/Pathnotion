@@ -380,7 +380,10 @@ function NewArticleDialog({ initialFolderId, onClose, onCreated }: {
             style={{ width: '100%', height: 36, boxSizing: 'border-box' }}
           />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {/* Use <div> not <label> — wrapping a Dropdown's <button> trigger in a label
+            causes clicks on options to bubble up and re-fire on the trigger, which
+            re-opens the popup. Same bug pattern as the backlog new-item dialog. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Tag</span>
           <Dropdown<string>
             value={tag}
@@ -388,7 +391,7 @@ function NewArticleDialog({ initialFolderId, onClose, onCreated }: {
             options={options}
             ariaLabel="Tag"
           />
-        </label>
+        </div>
         <div style={{ fontSize: 11, color: 'var(--fg-4)' }}>
           Tagging groups articles on the <b>All articles</b> view. You can change the tag later.
         </div>

@@ -92,6 +92,9 @@ export function blocksToTipTap(blocks: DocBlock[]): TipTapDoc {
         // File blocks aren't authored in the editor; preserve them as a read-only placeholder.
         content.push({ type: 'preservedBlock', attrs: { original: JSON.stringify(b) } });
         break;
+      case 'image':
+        content.push({ type: 'image', attrs: { src: b.src, alt: b.alt ?? '', title: b.title ?? null } });
+        break;
     }
   }
   // Ensure the doc always has at least one paragraph so the cursor has somewhere to go.
@@ -226,6 +229,13 @@ function nodeToBlock(node: TipTapNode): DocBlock | null {
         try { return JSON.parse(raw) as DocBlock; } catch { return null; }
       }
       return null;
+    }
+    case 'image': {
+      const src = typeof node.attrs?.src === 'string' ? node.attrs.src : '';
+      if (!src) return null;
+      const alt = typeof node.attrs?.alt === 'string' ? node.attrs.alt : undefined;
+      const title = typeof node.attrs?.title === 'string' ? node.attrs.title : undefined;
+      return { type: 'image', src, ...(alt ? { alt } : {}), ...(title ? { title } : {}) };
     }
     case 'table': {
       const rowNodes = node.content ?? [];

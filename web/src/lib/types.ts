@@ -153,6 +153,7 @@ export type DocBlock =
   | { type: 'divider' }
   | { type: 'callout'; tone: 'info' | 'warn'; text: string; inline?: InlineNode[]; align?: TextAlign }
   | { type: 'file'; name: string; ext: string; bytes: number }
+  | { type: 'image'; src: string; alt?: string; title?: string }
   | { type: 'table'; columns: string[]; rows: string[][] };
 
 export interface DocPage {
