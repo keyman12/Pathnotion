@@ -387,6 +387,13 @@ export function useResetUserPassword() {
     mutationFn: (args: { id: number; password: string }) => api.auth.users.resetPassword(args.id, args.password),
   });
 }
+/** Self-serve change password — for the currently logged-in user. Requires their current
+ *  password to verify. Use in the Settings → Account panel. */
+export function useChangeOwnPassword() {
+  return useMutation({
+    mutationFn: (args: { current: string; next: string }) => api.auth.changePassword(args.current, args.next),
+  });
+}
 
 // Products CRUD
 export function useCreateProduct() {

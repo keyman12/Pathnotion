@@ -5,6 +5,7 @@ import { Dropdown } from '../components/Dropdown';
 import { Icon } from '../components/Icon';
 import {
   useBusinessCategories,
+  useChangeOwnPassword,
   useClearJeffLogo,
   useCompetitors,
   useConnectGoogleCalendar,
@@ -45,10 +46,12 @@ import { api } from '../lib/api';
 import type { BusinessCategory, JeffCompetitor, JeffLogoRef, JeffStyleSheet, JeffTypeScale, NotificationPrefs, SessionUser } from '../lib/api';
 import type { Product } from '../lib/types';
 
-type Tab = 'users' | 'products' | 'categories' | 'jeff' | 'google' | 'notifications';
+type Tab = 'account' | 'users' | 'products' | 'categories' | 'jeff' | 'google' | 'notifications';
 
 export function SettingsView() {
-  const [tab, setTab] = useState<Tab>('users');
+  // Default to 'account' so a member who lands on Settings sees something they can use,
+  // not an "Access denied" panel. Admins can still flick to Users.
+  const [tab, setTab] = useState<Tab>('account');
   const session = useSession();
   const isAdmin = session.data?.role === 'admin';
 
@@ -58,6 +61,7 @@ export function SettingsView() {
         title="Settings"
         sub="Workspace configuration"
         tabs={[
+          { id: 'account', label: 'Account' },
           { id: 'users', label: 'Users' },
           { id: 'products', label: 'Products' },
           { id: 'categories', label: 'Business categories' },
@@ -69,12 +73,118 @@ export function SettingsView() {
         onTab={setTab}
       />
 
+      {tab === 'account' && <AccountTab />}
       {tab === 'users' && (isAdmin ? <UsersTab /> : <NotAllowed />)}
       {tab === 'products' && (isAdmin ? <ProductsTab /> : <NotAllowed />)}
       {tab === 'categories' && (isAdmin ? <CategoriesTab /> : <NotAllowed />)}
       {tab === 'jeff' && (isAdmin ? <JeffTab /> : <NotAllowed />)}
       {tab === 'google' && <GoogleTab />}
       {tab === 'notifications' && <NotificationsTab />}
+    </div>
+  );
+}
+
+/** Self-serve account panel — every logged-in user sees this. Currently has the change-password
+ *  form; would be the natural home for "change display name" / "change avatar" later. */
+function AccountTab() {
+  const session = useSession();
+  const change = useChangeOwnPassword();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setDone(false);
+    if (next.length < 8) { setError('New password must be at least 8 characters.'); return; }
+    if (next !== confirm) { setError("New password and confirmation don't match."); return; }
+    try {
+      await change.mutateAsync({ current, next });
+      setCurrent(''); setNext(''); setConfirm('');
+      setDone(true);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  if (!session.data) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 520 }}>
+      <div style={{
+        background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+        borderRadius: 8, padding: '16px 18px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Avatar who={session.data.key === 'D' ? 'D' : session.data.key === 'R' ? 'R' : 'A'} size={36} />
+          <div>
+            <div style={{ fontSize: 14, color: 'var(--fg-1)', fontWeight: 500 }}>{session.data.displayName}</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--fg-4)' }}>@{session.data.username} · {session.data.role}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{
+        background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+        borderRadius: 8, padding: '18px 20px',
+      }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-1)', margin: '0 0 12px' }}>Change password</h3>
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Labelled label="Current password">
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              className="input"
+              style={{ height: 32, width: '100%' }}
+            />
+          </Labelled>
+          <Labelled label="New password">
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              className="input"
+              style={{ height: 32, width: '100%' }}
+              placeholder="Min 8 characters"
+            />
+          </Labelled>
+          <Labelled label="Confirm new">
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className="input"
+              style={{ height: 32, width: '100%' }}
+            />
+          </Labelled>
+          {error && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--danger-bg)', color: 'var(--danger-fg)', fontSize: 12.5 }}>
+              {error}
+            </div>
+          )}
+          {done && (
+            <div style={{ padding: '8px 12px', borderRadius: 6, background: 'var(--success-bg)', color: 'var(--success-fg)', fontSize: 12.5 }}>
+              Password updated. Use the new password next time you sign in.
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={change.isPending || !current || next.length < 8 || next !== confirm}
+            >
+              {change.isPending ? 'Updating…' : 'Update password'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -730,7 +840,7 @@ function UsersTab() {
         {users.map((u, i) => (
           <div key={u.id} style={{
             display: 'grid',
-            gridTemplateColumns: '44px 1fr 120px 140px 90px 32px 28px',
+            gridTemplateColumns: '44px 1fr 160px 90px 60px auto auto',
             alignItems: 'center',
             gap: 14,
             padding: '12px 16px',
@@ -741,16 +851,26 @@ function UsersTab() {
               <div style={{ fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500 }}>{u.displayName}</div>
               <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>@{u.username}</div>
             </div>
-            <span style={{ fontSize: 12, color: 'var(--fg-3)' }}>{u.email ?? '—'}</span>
+            <span style={{ fontSize: 12, color: 'var(--fg-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email ?? '—'}</span>
             <span style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
               {u.role}
             </span>
             <span className="mono" style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>{u.key}</span>
-            <button className="btn btn-subtle btn-icon" title="Edit" onClick={() => setEditingId(u.id)}>
-              <Icon name="edit" size={13} />
+            <button
+              className="btn btn-ghost"
+              title="Edit display name, email, role"
+              onClick={() => setEditingId(u.id)}
+              style={{ padding: '6px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Icon name="edit" size={12} /> Edit
             </button>
-            <button className="btn btn-subtle btn-icon" title="Reset password" onClick={() => setResettingId(u.id)}>
-              <Icon name="lock" size={13} />
+            <button
+              className="btn btn-ghost"
+              title="Set a new password for this user (admin reset)"
+              onClick={() => setResettingId(u.id)}
+              style={{ padding: '6px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Icon name="lock" size={12} /> Reset password
             </button>
           </div>
         ))}
