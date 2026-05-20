@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { Avatar, BacklogRow, HeadlineCard } from '../components/primitives';
 import { Icon } from '../components/Icon';
 import { JeffArticleModal } from '../components/JeffArticleModal';
-import { PRODUCT_DOCS } from '../lib/seed';
 import { useUI } from '../lib/store';
 import { useSession } from '../lib/useSession';
-import { useBacklog, useCalendar, useJeffTodayFeed, useProducts, useRunAgentJob, useTasks } from '../lib/queries';
+import { useBacklog, useCalendar, useJeffTodayFeed, useRunAgentJob, useSalesSummary, useTasks } from '../lib/queries';
 import type { JeffTodayFeedItem } from '../lib/api';
-import type { CalendarEvent, Doc, FounderKey } from '../lib/types';
+import type { CalendarEvent, FounderKey, SalesOpportunity } from '../lib/types';
 
 const KIND_LABEL: Record<string, string> = {
   'daily-news':           "Today's news",
@@ -24,7 +23,7 @@ export function WeekView({ now }: { now: Date }) {
   const backlogQ = useBacklog();
   const tasksQ = useTasks();
   const calQ = useCalendar();
-  const productsQ = useProducts();
+  const salesQ = useSalesSummary();
 
   const items = backlogQ.data ?? [];
   const tasks = tasksQ.data ?? [];
@@ -38,7 +37,8 @@ export function WeekView({ now }: { now: Date }) {
   // Tolerates both ISO YYYY-MM-DD (modern) and the legacy "today"/"tomorrow" free-form strings.
   const tasksToday = tasks.filter((t) => !t.done && isTaskNearDue(t.due, now));
   const todayEvents = events.filter((e) => isEventToday(e, now)).sort((a, b) => a.start - b.start);
-  const recentDocs = PRODUCT_DOCS.filter((d) => d.updated.includes('today') || d.updated.includes('yesterday')).slice(0, 3);
+  const salesSummary = salesQ.data;
+  const salesAttention = salesSummary?.needsAttention ?? 0;
 
   const meta = now
     .toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })
@@ -67,26 +67,32 @@ export function WeekView({ now }: { now: Date }) {
           Good morning, {greetingName}.{' '}
           <span style={{ color: 'var(--fg-3)' }}>
             {nowItems.length} in flight, {dueThisWeek.length} needing attention, {todayEvents.length} meetings today.
+            {salesAttention ? ` Sales has ${salesAttention} needing attention.` : ''}
           </span>
         </h1>
       </div>
 
       {/* Headline strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 28 }}>
         <HeadlineCard label="In flight"      value={nowItems.length}     foot={`${dDave} Dave · ${dRaj} Raj`}            onClick={() => navigate('backlog')} />
         <HeadlineCard label="Due / overdue"  value={dueThisWeek.length}  foot={`${overdueCount} overdue, ${dueCount} due this week`} tone="warn"  onClick={() => navigate('backlog')} />
         <HeadlineCard label="Meetings today" value={todayEvents.length}  foot="Next: Bank partner intro · 11:00"        onClick={() => navigate('calendar')} />
+        <HeadlineCard label="Sales pipeline" value={money(salesSummary?.openPipeline ?? 0)} foot={`${money(salesSummary?.weightedForecast ?? 0)} weighted · ${salesAttention} need attention`} tone="accent" onClick={() => navigate('sales')} />
         <HeadlineCard label="Jeff's jobs"    value={3}                   foot="Last run 07:45 · 1 proposal" tone="accent" onClick={() => navigate('jeff')} />
       </div>
 
       {/* Two-column split */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 24 }} className="week-split">
         {/* LEFT */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <Section title="Now" actionLabel="Open backlog →" onAction={() => navigate('backlog')}>
+        <div className="week-right-stack">
+          <Section title="Product Backlog" actionLabel="Open backlog →" onAction={() => navigate('backlog')}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {nowItems.map((b) => <BacklogRow key={b.id} item={b} onClick={() => navigate('backlog', b.id)} />)}
             </div>
+          </Section>
+
+          <Section title="Jeff · week so far" actionLabel="See all runs →" onAction={() => navigate('jeff')}>
+            <JeffSummary />
           </Section>
 
           <Section title="Needs attention" sub="Overdue + due this week">
@@ -94,24 +100,36 @@ export function WeekView({ now }: { now: Date }) {
               {dueThisWeek.map((b) => <BacklogRow key={b.id} item={b} onClick={() => navigate('backlog', b.id)} />)}
             </div>
           </Section>
-
-          <Section title="Jeff · week so far" actionLabel="See all runs →" onAction={() => navigate('jeff')}>
-            <JeffSummary />
-          </Section>
         </div>
 
         {/* RIGHT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <Section title="Today" actionLabel="Week →" onAction={() => navigate('calendar')}>
+          <Section title="Sales focus" actionLabel="Pipeline →" onAction={() => navigate('sales')}>
             <div style={{
               background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-              borderRadius: 8, padding: '16px 18px',
+              borderRadius: 8, overflow: 'hidden',
             }}>
-              {todayEvents.map((e, i) => (
-                <TodayRow key={i} event={e} last={i === todayEvents.length - 1} />
+              {(salesSummary ? salesRows(salesSummary.dueToday, salesSummary.overdue, salesSummary.closeSoon, salesSummary.attention) : []).map((o, i, rows) => (
+                <SalesFocusRow key={`${o.id}-${i}`} opportunity={o} last={i === rows.length - 1} />
               ))}
+              {salesSummary && !salesSummary.dueToday.length && !salesSummary.overdue.length && !salesSummary.closeSoon.length && !salesSummary.attention.length && (
+                <div style={{ padding: '14px', color: 'var(--fg-3)', fontSize: 13 }}>No sales actions due today.</div>
+              )}
             </div>
           </Section>
+
+          <div className="week-today-align">
+            <Section title="Today" actionLabel="Week →" onAction={() => navigate('calendar')}>
+              <div style={{
+                background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                borderRadius: 8, padding: '16px 18px',
+              }}>
+                {todayEvents.map((e, i) => (
+                  <TodayRow key={i} event={e} last={i === todayEvents.length - 1} />
+                ))}
+              </div>
+            </Section>
+          </div>
 
           <Section title="Tasks" actionLabel="All →" onAction={() => navigate('tasks')}>
             <div style={{
@@ -136,12 +154,44 @@ export function WeekView({ now }: { now: Date }) {
             </div>
           </Section>
 
-          <Section title="Recently edited" actionLabel="All →" onAction={() => navigate('docs')}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recentDocs.map((d) => <DocRow key={d.id} doc={d} products={productsQ.data ?? []} />)}
-            </div>
-          </Section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function salesRows(...groups: SalesOpportunity[][]) {
+  const seen = new Set<string>();
+  return groups.flat().filter((o) => {
+    if (seen.has(o.id)) return false;
+    seen.add(o.id);
+    return true;
+  }).slice(0, 4);
+}
+
+function SalesFocusRow({ opportunity, last }: { opportunity: SalesOpportunity; last: boolean }) {
+  const navigate = useUI((s) => s.navigate);
+  const flag = opportunity.attentionFlags[0];
+  return (
+    <div
+      className="row-hover"
+      onClick={() => navigate('sales')}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) max-content',
+        gap: 12,
+        padding: '11px 14px',
+        cursor: 'pointer',
+        borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ color: 'var(--fg-1)', fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opportunity.accountName}</div>
+        <div style={{ color: 'var(--fg-3)', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opportunity.nextAction ?? opportunity.name}</div>
+      </div>
+      <div style={{ textAlign: 'right', fontSize: 12, color: flag?.kind === 'overdue' ? 'var(--danger-fg)' : flag ? 'var(--warning-fg)' : 'var(--fg-2)' }}>
+        <strong style={{ display: 'block', color: 'inherit' }}>{money(opportunity.valueAmount)}</strong>
+        <span>{flag?.label ?? `${opportunity.forecastProbability}%`}</span>
       </div>
     </div>
   );
@@ -201,32 +251,6 @@ function TodayRow({ event, last }: { event: CalendarEvent; last: boolean }) {
         <div style={{ fontSize: 13, color: 'var(--fg-1)', fontWeight: 500 }}>{event.title}</div>
         <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>{subtitle}</div>
       </div>
-    </div>
-  );
-}
-
-function DocRow({ doc, products }: { doc: Doc; products: Array<{ id: string; label: string; color: string }> }) {
-  const p = doc.product ? products.find((x) => x.id === doc.product) : null;
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 16px',
-      background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 6,
-      cursor: 'pointer',
-    }} className="row-hover">
-      <Icon name="docs" size={14} color="var(--fg-3)" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: 'var(--fg-1)', fontWeight: 500 }}>{doc.title}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-          {p && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--fg-3)' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: p.color }} />{p.label}
-            </span>
-          )}
-          <span className="meta" style={{ fontSize: 9.5 }}>{doc.updated.toUpperCase()} · {doc.size.toUpperCase()}</span>
-        </div>
-      </div>
-      <Avatar who={doc.by} size={20} />
     </div>
   );
 }
@@ -381,6 +405,10 @@ function isTaskNearDue(due: string | null | undefined, now: Date): boolean {
   const dayMs = 24 * 60 * 60 * 1000;
   const diffDays = Math.round((d.getTime() - today.getTime()) / dayMs);
   return diffDays <= 7; // overdue (negative) or within the next week
+}
+
+function money(value: number) {
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(value || 0);
 }
 
 function getWeekNumber(d: Date): number {

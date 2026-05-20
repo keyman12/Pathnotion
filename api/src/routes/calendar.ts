@@ -8,6 +8,8 @@ import { syncUser } from '../services/calendar-sync.js';
 
 export const calendarRouter = Router();
 
+const GOOGLE_TASKS_SCOPE = 'https://www.googleapis.com/auth/tasks';
+
 // ─── Types + helpers for calendar_sources rows ──────────────────────────────
 
 interface SourceRow {
@@ -58,14 +60,25 @@ calendarRouter.get('/google/status', (req, res) => {
     const { key } = requireUser(req);
     if (!isGoogleConfigured()) return res.json({ configured: false, connected: false });
     const row = db.prepare(
-      "SELECT id, email, connected_at, last_sync_at FROM calendar_sources WHERE user_key = ? AND provider = 'google' LIMIT 1",
-    ).get(key) as { id: number; email: string | null; connected_at: string | null; last_sync_at: string | null } | undefined;
+      "SELECT id, email, connected_at, last_sync_at, tasks_last_sync_at, scope FROM calendar_sources WHERE user_key = ? AND provider = 'google' LIMIT 1",
+    ).get(key) as {
+      id: number;
+      email: string | null;
+      connected_at: string | null;
+      last_sync_at: string | null;
+      tasks_last_sync_at: string | null;
+      scope: string | null;
+    } | undefined;
+    const hasTasksScope = !!row?.scope?.split(/\s+/).includes(GOOGLE_TASKS_SCOPE);
     res.json({
       configured: true,
       connected: !!row,
       email: row?.email ?? null,
       connectedAt: row?.connected_at ?? null,
       lastSyncAt: row?.last_sync_at ?? null,
+      tasksLastSyncAt: row?.tasks_last_sync_at ?? null,
+      hasTasksScope,
+      requiresTasksReconnect: !!row && !hasTasksScope,
     });
   } catch (err: any) {
     res.status(err.status ?? 500).json({ error: err.message ?? 'Server error' });
@@ -151,7 +164,7 @@ calendarRouter.get('/google/callback', async (req, res) => {
     res.send(`<!doctype html><meta charset="utf-8"><title>Connected</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f0f11;color:#e8e9eb;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style>
 <div>
-  <h1 style="font-size:20px">Google Calendar connected.</h1>
+  <h1 style="font-size:20px">Google connected.</h1>
   <p style="color:#b5b6ba">You can close this tab and return to PathNotion.</p>
 </div>
 <script>

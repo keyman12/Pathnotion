@@ -9,6 +9,7 @@ export type Route =
   | 'jeff'
   | 'settings'
   | 'reports'
+  | 'sales'
   | 'finance-docs'
   | 'sales-docs'
   | 'legal-docs'
@@ -71,6 +72,11 @@ export interface Task {
   /** Urgency — P1 highest, P3 lowest. Null/undefined = no priority assigned. */
   priority?: TaskPriority | null;
   attachments?: Attachment[];
+  googleTaskId?: string | null;
+  googleTaskListId?: string | null;
+  googleOwnerKey?: FounderKey | null;
+  googleWebLink?: string | null;
+  lastSyncedAt?: string | null;
 }
 
 export interface CalendarEvent {
@@ -203,4 +209,83 @@ export interface AccessGrant {
   read: boolean;
   write: boolean;
   lastTouched?: string;
+}
+
+export type SalesStage = 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'commit' | 'won' | 'lost';
+export type SalesStatus = 'active' | 'won' | 'lost' | 'parked';
+export type SalesForecastLabel = 'pipeline' | 'best_case' | 'commit';
+
+export interface SalesAttentionFlag {
+  kind: 'overdue' | 'stale' | 'missing-value' | 'missing-contact' | 'past-close' | 'weak-commit';
+  label: string;
+}
+
+export interface SalesActivity {
+  id: string;
+  opportunityId: string;
+  type: 'note' | 'stage' | 'link' | 'jeff';
+  body: string;
+  authorKey: FounderKey | 'J' | null;
+  activityDate: string;
+  createdAt: string;
+}
+
+export interface SalesLink {
+  id: string;
+  opportunityId: string;
+  linkType: 'doc' | 'drive' | 'url' | 'upload' | 'backlog' | 'task' | 'calendar';
+  linkRef: string;
+  label: string | null;
+  createdAt: string;
+}
+
+export interface SalesOpportunity {
+  id: string;
+  name: string;
+  accountName: string;
+  contactName: string;
+  contactTitle: string | null;
+  contactLocation: string | null;
+  contactPhotoUrl: string | null;
+  contactPhone: string | null;
+  contactEmail: string | null;
+  website: string | null;
+  ownerKey: FounderKey;
+  stage: SalesStage;
+  status: SalesStatus;
+  valueAmount: number;
+  currency: string;
+  forecastLabel: SalesForecastLabel;
+  forecastProbability: number;
+  weightedValue: number;
+  expectedCloseDate: string | null;
+  nextAction: string | null;
+  nextActionDate: string | null;
+  notes: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  attentionFlags: SalesAttentionFlag[];
+  activities?: SalesActivity[];
+  links?: SalesLink[];
+}
+
+export interface SalesSummary {
+  openPipeline: number;
+  weightedForecast: number;
+  commitRawThisMonth: number;
+  commitWeightedThisMonth: number;
+  needsAttention: number;
+  activeCount: number;
+  forecastByMonth: Array<{
+    month: string;
+    rawPipeline: number;
+    weighted: number;
+    commitRaw: number;
+    commitWeighted: number;
+  }>;
+  dueToday: SalesOpportunity[];
+  overdue: SalesOpportunity[];
+  closeSoon: SalesOpportunity[];
+  attention: SalesOpportunity[];
 }

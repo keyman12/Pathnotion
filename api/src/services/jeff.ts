@@ -49,6 +49,40 @@ function client(): Anthropic {
   return new Anthropic({ apiKey: key });
 }
 
+function normalizeJeffProviderError(err: unknown): Error {
+  const raw = err as any;
+  const status = Number(raw?.status ?? raw?.statusCode ?? raw?.response?.status ?? 0) || undefined;
+  const providerType = raw?.error?.type ?? raw?.type;
+  const message = typeof raw?.message === 'string' ? raw.message : '';
+
+  if (
+    status === 401 ||
+    providerType === 'authentication_error' ||
+    /authentication_error|invalid x-api-key|api key/i.test(message)
+  ) {
+    return Object.assign(
+      new Error('Jeff is configured with an invalid Anthropic API key. Update ANTHROPIC_API_KEY in api/.env, restart the API, then try again.'),
+      { status: 401, code: 'JEFF_AUTH_INVALID' },
+    );
+  }
+
+  if (status === 429) {
+    return Object.assign(
+      new Error('Jeff is being rate limited by Anthropic. Please wait a minute and try again.'),
+      { status: 429, code: 'JEFF_RATE_LIMITED' },
+    );
+  }
+
+  if (status && status >= 500) {
+    return Object.assign(
+      new Error('Jeff could not reach Anthropic cleanly. Please try again shortly.'),
+      { status: 503, code: 'JEFF_PROVIDER_UNAVAILABLE' },
+    );
+  }
+
+  return err instanceof Error ? err : new Error('Jeff request failed.');
+}
+
 /** Cheap status check so the UI can show a "Jeff isn't configured" message instead of erroring on send.
  *  `model` is the chat-tier model (what the founders interact with directly); `models` exposes the
  *  full per-workload split so the UI can render it if it wants. */
@@ -273,64 +307,68 @@ export async function askJeff(opts: {
    *  with an AbortError. Used by the scheduler so a user can cancel a running job. */
   signal?: AbortSignal;
 }): Promise<{ text: string; model: string; toolCalls: ToolCallLog[] }> {
-  // Lazy import so TS doesn't complain about circular dep at eval time.
-  const { allTools, runTool } = await import('./jeff-tools.js');
-  const c = client();
-  const system = buildSystemPrompt();
-  const model = opts.model ?? JEFF_MODEL_CHAT;
+  try {
+    // Lazy import so TS doesn't complain about circular dep at eval time.
+    const { allTools, runTool } = await import('./jeff-tools.js');
+    const c = client();
+    const system = buildSystemPrompt();
+    const model = opts.model ?? JEFF_MODEL_CHAT;
 
-  type Msg = { role: 'user' | 'assistant'; content: any };
-  const history = opts.history ?? [];
-  const messages: Msg[] = [
-    ...history.map<Msg>((h) => ({ role: h.role, content: h.content })),
-    { role: 'user', content: opts.message },
-  ];
-  const tools = allTools();
-  const toolCalls: ToolCallLog[] = [];
-  const maxSteps = opts.maxSteps ?? 6;
+    type Msg = { role: 'user' | 'assistant'; content: any };
+    const history = opts.history ?? [];
+    const messages: Msg[] = [
+      ...history.map<Msg>((h) => ({ role: h.role, content: h.content })),
+      { role: 'user', content: opts.message },
+    ];
+    const tools = allTools();
+    const toolCalls: ToolCallLog[] = [];
+    const maxSteps = opts.maxSteps ?? 6;
 
-  let text = '';
-  for (let step = 0; step < maxSteps; step++) {
-    if (opts.signal?.aborted) throw new Error('aborted');
-    const response = await c.messages.create({
-      model,
-      max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS_CHAT,
-      system,
-      messages,
-      tools,
-    }, { signal: opts.signal });
+    let text = '';
+    for (let step = 0; step < maxSteps; step++) {
+      if (opts.signal?.aborted) throw new Error('aborted');
+      const response = await c.messages.create({
+        model,
+        max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS_CHAT,
+        system,
+        messages,
+        tools,
+      }, { signal: opts.signal });
 
-    // Push the assistant turn so tool results can refer back to it.
-    messages.push({ role: 'assistant', content: response.content });
+      // Push the assistant turn so tool results can refer back to it.
+      messages.push({ role: 'assistant', content: response.content });
 
-    // Collect text so far (may span multiple steps).
-    const stepText = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text).join('').trim();
-    if (stepText) text = stepText;
+      // Collect text so far (may span multiple steps).
+      const stepText = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text).join('').trim();
+      if (stepText) text = stepText;
 
-    if (response.stop_reason !== 'tool_use') break;
+      if (response.stop_reason !== 'tool_use') break;
 
-    // Execute every tool_use block, feed results back as a single user turn.
-    const toolUses = response.content.filter((b: any) => b.type === 'tool_use');
-    const toolResults: any[] = [];
-    for (const tu of toolUses as any[]) {
-      // Skip server-side tools (Anthropic already ran them before returning).
-      if (tu.name === 'web_search' || tu.name === 'web_fetch') continue;
-      const { content, isError } = await runTool(tu.name, tu.input);
-      toolCalls.push({ name: tu.name, input: tu.input, result: content.slice(0, 2000), isError });
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: tu.id,
-        content,
-        is_error: !!isError,
-      });
+      // Execute every tool_use block, feed results back as a single user turn.
+      const toolUses = response.content.filter((b: any) => b.type === 'tool_use');
+      const toolResults: any[] = [];
+      for (const tu of toolUses as any[]) {
+        // Skip server-side tools (Anthropic already ran them before returning).
+        if (tu.name === 'web_search' || tu.name === 'web_fetch') continue;
+        const { content, isError } = await runTool(tu.name, tu.input);
+        toolCalls.push({ name: tu.name, input: tu.input, result: content.slice(0, 2000), isError });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content,
+          is_error: !!isError,
+        });
+      }
+      if (!toolResults.length) break; // all server-side — nothing for us to return
+      messages.push({ role: 'user', content: toolResults });
     }
-    if (!toolResults.length) break; // all server-side — nothing for us to return
-    messages.push({ role: 'user', content: toolResults });
-  }
 
-  return { text: text || '(Jeff returned an empty reply.)', model, toolCalls };
+    return { text: text || '(Jeff returned an empty reply.)', model, toolCalls };
+  } catch (err) {
+    throw normalizeJeffProviderError(err);
+  }
 }
 
 // ─── Article scan — populate memory from PathNotion articles ────────────────

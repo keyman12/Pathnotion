@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import type { ApiError, BusinessCategory, NotificationPrefs } from './api';
-import type { BacklogItem, CalendarEvent, Task } from './types';
+import type { BacklogItem, CalendarEvent, SalesOpportunity, Task } from './types';
 
 // Every hook assumes the session is authed (App gates on it).
 // On 401 mid-session, clear the session cache so the AuthGate redirects back to /login.
@@ -77,8 +77,19 @@ export function usePatchTask() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: { id: number; patch: Partial<Task> }) => api.tasks.patch(args.id, args.patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
-    onError: (err) => handle401(err, qc),
+    onMutate: async ({ id, patch }) => {
+      await qc.cancelQueries({ queryKey: ['tasks'] });
+      const previous = qc.getQueryData<Task[]>(['tasks']);
+      qc.setQueryData<Task[]>(['tasks'], (old) =>
+        old?.map((task) => task.id === id ? { ...task, ...patch } : task),
+      );
+      return { previous };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(['tasks'], ctx.previous);
+      handle401(err, qc);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
   });
 }
 
@@ -87,6 +98,126 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: (id: number) => api.tasks.remove(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function useSyncTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.tasks.sync(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+// Sales
+export function useSalesOpportunities() {
+  return useQuery({
+    queryKey: ['sales', 'opportunities'],
+    queryFn: () => api.sales.opportunities(),
+    staleTime: 20_000,
+  });
+}
+
+export function useSalesOpportunity(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['sales', 'opportunity', id],
+    queryFn: () => api.sales.opportunity(id as string),
+    enabled: !!id,
+    staleTime: 10_000,
+    refetchInterval: (query) => shouldPollInitialSalesEnrichment(query.state.data as SalesOpportunity | undefined) ? 5_000 : false,
+  });
+}
+
+function shouldPollInitialSalesEnrichment(opportunity: SalesOpportunity | undefined): boolean {
+  if (!opportunity || !isRecentSalesOpportunity(opportunity.createdAt)) return false;
+  const links = opportunity.links ?? [];
+  const hasLinkedIn = links.some((link) => /linkedin\.com/i.test(link.linkRef));
+  const hasBrief = links.some((link) => link.linkType === 'doc' && /^Jeff brief ·/i.test(link.label ?? ''));
+  return !hasLinkedIn || !hasBrief;
+}
+
+function isRecentSalesOpportunity(createdAt: string): boolean {
+  const date = new Date(createdAt.includes('T') ? createdAt : `${createdAt.replace(' ', 'T')}Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  return Date.now() - date.getTime() < 10 * 60_000;
+}
+
+export function useSalesSummary() {
+  return useQuery({
+    queryKey: ['sales', 'summary'],
+    queryFn: () => api.sales.summary(),
+    staleTime: 20_000,
+  });
+}
+
+export function useCreateSalesOpportunity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.sales.createOpportunity>[0]) => api.sales.createOpportunity(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['agent', 'today-feed'] });
+    },
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function usePatchSalesOpportunity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; patch: Partial<SalesOpportunity> & { note?: string | null } }) =>
+      api.sales.patchOpportunity(args.id, args.patch),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales', 'opportunity', vars.id] });
+      qc.invalidateQueries({ queryKey: ['agent', 'today-feed'] });
+    },
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function useDeleteSalesOpportunity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.sales.removeOpportunity(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function useReorderSalesOpportunities() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: Parameters<typeof api.sales.reorder>[0]) => api.sales.reorder(items),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function useFindSalesLinkedIn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.sales.findLinkedIn(id),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales', 'opportunity', id] });
+      qc.invalidateQueries({ queryKey: ['docs'] });
+    },
+    onError: (err) => handle401(err, qc),
+  });
+}
+
+export function useCreateSalesBrief() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.sales.createBrief(id),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales', 'opportunity', id] });
+      qc.invalidateQueries({ queryKey: ['docs'] });
+    },
     onError: (err) => handle401(err, qc),
   });
 }

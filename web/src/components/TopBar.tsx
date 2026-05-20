@@ -16,6 +16,7 @@ const TITLE: Record<string, string> = {
   jeff: 'Jeff',
   settings: 'Settings',
   reports: 'Reports',
+  sales: 'Sales',
   'finance-docs': 'Finance',
   'sales-docs': 'Sales',
   'legal-docs': 'Legal',

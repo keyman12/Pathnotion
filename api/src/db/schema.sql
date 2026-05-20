@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   done        INTEGER NOT NULL DEFAULT 0,
   link_type   TEXT,                                -- 'doc' | 'backlog'
   link_ref    TEXT,
+  google_task_id      TEXT,
+  google_task_list_id TEXT,
+  google_owner_key    TEXT,
+  google_etag         TEXT,
+  google_updated_at   TEXT,
+  google_web_link     TEXT,
+  last_synced_at      TEXT,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -84,6 +91,7 @@ CREATE TABLE IF NOT EXISTS calendar_sources (
   mode          TEXT NOT NULL DEFAULT 'caldav',    -- 'caldav' | 'ics'
   endpoint      TEXT,
   last_sync_at  TEXT,
+  tasks_last_sync_at TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -189,7 +197,60 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   enabled         INTEGER NOT NULL DEFAULT 1,
   delivery_time   TEXT NOT NULL DEFAULT '07:00',   -- HH:MM local
-  sections        TEXT NOT NULL DEFAULT '{"meetings":true,"overdue":true,"tasks":true,"upcoming":true}',
+  sections        TEXT NOT NULL DEFAULT '{"meetings":true,"overdue":true,"tasks":true,"upcoming":true,"sales":true}',
   last_sent_date  TEXT,                            -- YYYY-MM-DD of last delivery (dedupe)
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Lightweight Sales CRM. Account/contact data stays on the opportunity in v1.
+CREATE TABLE IF NOT EXISTS sales_opportunities (
+  id                    TEXT PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  account_name          TEXT NOT NULL,
+  contact_name          TEXT NOT NULL,
+  contact_title         TEXT,
+  contact_location      TEXT,
+  contact_photo_url     TEXT,
+  contact_phone         TEXT,
+  contact_email         TEXT,
+  website               TEXT,
+  owner_key             TEXT NOT NULL,
+  stage                 TEXT NOT NULL DEFAULT 'lead',
+  status                TEXT NOT NULL DEFAULT 'active',
+  value_amount          REAL NOT NULL DEFAULT 0,
+  currency              TEXT NOT NULL DEFAULT 'GBP',
+  forecast_label        TEXT NOT NULL DEFAULT 'pipeline',
+  forecast_probability  INTEGER NOT NULL DEFAULT 10,
+  expected_close_date   TEXT,
+  next_action           TEXT,
+  next_action_date      TEXT,
+  notes                 TEXT,
+  sort_order            INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sales_opportunities_stage ON sales_opportunities(stage);
+CREATE INDEX IF NOT EXISTS idx_sales_opportunities_status ON sales_opportunities(status);
+CREATE INDEX IF NOT EXISTS idx_sales_opportunities_close ON sales_opportunities(expected_close_date);
+CREATE INDEX IF NOT EXISTS idx_sales_opportunities_next_action ON sales_opportunities(next_action_date);
+
+CREATE TABLE IF NOT EXISTS sales_activities (
+  id              TEXT PRIMARY KEY,
+  opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
+  type            TEXT NOT NULL DEFAULT 'note',
+  body            TEXT NOT NULL,
+  author_key      TEXT,
+  activity_date   TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sales_activities_opportunity ON sales_activities(opportunity_id);
+
+CREATE TABLE IF NOT EXISTS sales_links (
+  id              TEXT PRIMARY KEY,
+  opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
+  link_type       TEXT NOT NULL,
+  link_ref        TEXT NOT NULL,
+  label           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sales_links_opportunity ON sales_links(opportunity_id);

@@ -10,6 +10,7 @@ import { google, type Auth, type calendar_v3 } from 'googleapis';
 // Adding a scope here forces a re-consent for existing connections (Google requires re-grant on scope changes).
 export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/tasks',
   // Drive: read everything the user can see (for browsing) + manage files we create.
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.file',

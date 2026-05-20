@@ -11,6 +11,7 @@ interface NavLink { route: Route; label: string; icon: IconName; badge?: string;
 
 const WORKSPACE: NavLink[] = [
   { route: 'week', label: 'Today', icon: 'week' },
+  { route: 'sales', label: 'Sales', icon: 'money' },
   { route: 'backlog', label: 'Backlog', icon: 'backlog' },
   { route: 'docs', label: 'Documentation', icon: 'docs' },
   { route: 'tasks', label: 'Tasks', icon: 'tasks' },
@@ -20,7 +21,7 @@ const WORKSPACE: NavLink[] = [
 
 const BUILTIN_BUSINESS_ROUTE: Record<string, Route> = {
   finance: 'finance-docs',
-  sales: 'sales-docs',
+  sales: 'sales',
   legal: 'legal-docs',
 };
 
@@ -104,7 +105,7 @@ export function Sidebar() {
             <div className="sidebar-section__head">
               <span>Business</span>
             </div>
-            {categories.map((c) => {
+            {categories.filter((c) => c.id !== 'sales').map((c) => {
               const target = businessRouteFor(c.id);
               const active = route === target;
               const iconName = (c.icon as IconName) ?? 'money';

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
 import { Avatar } from '../components/primitives';
 import { Icon } from '../components/Icon';
@@ -8,7 +8,7 @@ import {
   AttachmentChipRow,
   AttachmentViewerDrawer,
 } from '../components/Attachments';
-import { useCreateTask, useDeleteTask, usePatchTask, useTasks } from '../lib/queries';
+import { useConnectGoogleCalendar, useCreateTask, useDeleteTask, useGoogleCalendarStatus, usePatchTask, useSyncTasks, useTasks } from '../lib/queries';
 import { useSession } from '../lib/useSession';
 import { useUI } from '../lib/store';
 import type { Attachment, FounderKey, Task, TaskPriority } from '../lib/types';
@@ -92,20 +92,98 @@ export function TasksView() {
   const [filter, setFilter] = useState<TaskFilter>('open');
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [justCompletedIds, setJustCompletedIds] = useState<Set<number>>(() => new Set());
   const session = useSession();
   const tasksQ = useTasks();
   const createTask = useCreateTask();
   const patchTask = usePatchTask();
   const deleteTask = useDeleteTask();
+  const syncTasks = useSyncTasks();
+  const googleStatus = useGoogleCalendarStatus();
+  const connectGoogle = useConnectGoogleCalendar();
+  const [syncStatus, setSyncStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === 'pn:calendar-connected') googleStatus.refetch();
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [googleStatus]);
+
+  const startGoogleConnect = async () => {
+    const { url } = await connectGoogle.mutateAsync();
+    const popup = window.open(url, 'pn-google-connect', 'width=540,height=720');
+    if (popup) {
+      const interval = window.setInterval(() => {
+        if (popup.closed) {
+          window.clearInterval(interval);
+          googleStatus.refetch();
+        }
+      }, 500);
+    }
+  };
+
+  const runTaskSync = async () => {
+    setSyncStatus(null);
+    try {
+      const result = await syncTasks.mutateAsync();
+      setSyncStatus({
+        kind: 'ok',
+        msg: `Synced. Pushed ${result.pushed}, added ${result.inserted}, updated ${result.updated}, deleted ${result.deleted}.`,
+      });
+      googleStatus.refetch();
+    } catch (err) {
+      setSyncStatus({ kind: 'err', msg: (err as Error).message });
+    }
+  };
 
   const tasks = tasksQ.data ?? [];
   const me: FounderKey = (session.data?.key as FounderKey) ?? 'D';
+
+  const setJustCompleted = (id: number, done: boolean) => {
+    setJustCompletedIds((current) => {
+      const next = new Set(current);
+      if (done) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const patchTaskWithCompletionCue = (id: number, patch: Partial<Task>) => {
+    if ('done' in patch) {
+      const wasJustCompleted = justCompletedIds.has(id);
+      const nextDone = Boolean(patch.done);
+      setJustCompleted(id, nextDone);
+      patchTask.mutate(
+        { id, patch },
+        {
+          onError: () => {
+            setJustCompletedIds((current) => {
+              const next = new Set(current);
+              if (wasJustCompleted) next.add(id);
+              else next.delete(id);
+              return next;
+            });
+          },
+        },
+      );
+      return;
+    }
+    patchTask.mutate({ id, patch });
+  };
 
   // Completed tasks are hidden by default. Mine/Raj's can opt in via the toggle;
   // the "All completed" tab is the dedicated archive.
   const shown = tasks.filter((t) => {
     if (filter === 'done') return t.done;
     if (t.done) {
+      const wasJustCompleted = justCompletedIds.has(t.id as number);
+      if (wasJustCompleted) {
+        if (filter === 'mine') return t.owner === me;
+        if (filter === 'raj') return t.owner === (me === 'D' ? 'R' : 'D');
+        return true;
+      }
       const allowedInOwnerView = (filter === 'mine' || filter === 'raj') && includeCompleted;
       if (!allowedInOwnerView) return false;
     }
@@ -117,7 +195,9 @@ export function TasksView() {
   // Smart bucket grouping: compute each task's bucket, then order and render.
   const buckets = new Map<string, { bucket: DueBucket; items: Task[] }>();
   for (const t of shown) {
-    const b = bucketFor(t);
+    const b = filter !== 'done' && t.done && justCompletedIds.has(t.id as number)
+      ? { key: 'completed-now', label: 'Completed just now', order: 8 }
+      : bucketFor(t);
     const entry = buckets.get(b.key);
     if (entry) entry.items.push(t);
     else buckets.set(b.key, { bucket: b, items: [t] });
@@ -131,6 +211,32 @@ export function TasksView() {
       <PageHeader
         title="Tasks"
         sub="Shared to-do. Tag each other. Link to backlog items or docs where it helps."
+        actions={
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {googleStatus.data?.requiresTasksReconnect && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={startGoogleConnect}
+                disabled={connectGoogle.isPending}
+                title="Grant Google Tasks permission"
+              >
+                <Icon name="plus" size={13} />
+                {connectGoogle.isPending ? 'Opening' : 'Reconnect Google'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={runTaskSync}
+              disabled={syncTasks.isPending || googleStatus.data?.requiresTasksReconnect}
+              title={googleStatus.data?.requiresTasksReconnect ? 'Reconnect Google to grant Tasks permission' : 'Sync Google Tasks'}
+            >
+              <Icon name="refresh" size={13} />
+              {syncTasks.isPending ? 'Syncing' : 'Sync'}
+            </button>
+          </div>
+        }
         tabs={
           <TaskTabs
             filter={filter}
@@ -148,6 +254,36 @@ export function TasksView() {
         }
       />
 
+      {googleStatus.data?.requiresTasksReconnect && (
+        <div style={{
+          marginTop: -8,
+          marginBottom: 16,
+          padding: '10px 12px',
+          border: '1px solid var(--warning-fg)',
+          borderRadius: 8,
+          background: 'var(--warning-bg)',
+          color: 'var(--warning-fg)',
+          fontSize: 12.5,
+        }}>
+          Google is connected for Calendar and Drive, but Tasks permission is missing. Reconnect Google once, then new and edited PathNotion tasks will sync to Google Tasks.
+        </div>
+      )}
+
+      {syncStatus && (
+        <div style={{
+          marginTop: -8,
+          marginBottom: 16,
+          padding: '10px 12px',
+          border: `1px solid ${syncStatus.kind === 'ok' ? 'var(--path-primary)' : 'var(--danger-fg)'}`,
+          borderRadius: 8,
+          background: syncStatus.kind === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+          color: syncStatus.kind === 'ok' ? 'var(--success-fg)' : 'var(--danger-fg)',
+          fontSize: 12.5,
+        }}>
+          {syncStatus.msg}
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         {byGroup.map(({ g, bucketKey, items }) => (
           <div key={bucketKey}>
@@ -161,17 +297,19 @@ export function TasksView() {
                   ? <TaskEditor
                       key={t.id}
                       task={t}
+                      justCompleted={justCompletedIds.has(t.id as number)}
                       last={i === items.length - 1}
                       onCollapse={() => setExpandedId(null)}
-                      onPatch={(patch) => patchTask.mutate({ id: t.id as number, patch })}
+                      onPatch={(patch) => patchTaskWithCompletionCue(t.id as number, patch)}
                       onDelete={() => { deleteTask.mutate(t.id as number); setExpandedId(null); }}
                     />
                   : <TaskRow
                       key={t.id}
                       task={t}
+                      justCompleted={justCompletedIds.has(t.id as number)}
                       last={i === items.length - 1}
                       onClick={() => setExpandedId(t.id as number)}
-                      onToggle={() => patchTask.mutate({ id: t.id as number, patch: { done: !t.done } as any })}
+                      onToggle={() => patchTaskWithCompletionCue(t.id as number, { done: !t.done } as Partial<Task>)}
                     />
               ))}
             </div>
@@ -248,8 +386,9 @@ function TaskTabs({ filter, setFilter, includeCompleted, setIncludeCompleted, co
   );
 }
 
-function TaskRow({ task, last, onClick, onToggle }: {
+function TaskRow({ task, justCompleted, last, onClick, onToggle }: {
   task: Task;
+  justCompleted: boolean;
   last: boolean;
   onClick: () => void;
   onToggle: () => void;
@@ -260,9 +399,12 @@ function TaskRow({ task, last, onClick, onToggle }: {
       padding: '12px 16px',
       borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
       cursor: 'pointer',
+      background: justCompleted ? 'var(--success-bg)' : 'transparent',
     }}>
       <button
+        type="button"
         onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        aria-label={task.done ? 'Mark task incomplete' : 'Mark task complete'}
         style={{
           width: 18, height: 18,
           border: `1.5px solid ${task.done ? 'var(--path-primary)' : 'var(--border-strong)'}`,
@@ -288,12 +430,18 @@ function TaskRow({ task, last, onClick, onToggle }: {
       {task.priority && <PriorityPill priority={task.priority} />}
       {task.due && <DuePill due={task.due} done={task.done} />}
       <Avatar who={task.owner} size={22} />
+      {justCompleted && (
+        <span className="mono" style={{ fontSize: 10, color: 'var(--success-fg)', whiteSpace: 'nowrap' }}>
+          Done
+        </span>
+      )}
     </div>
   );
 }
 
-function TaskEditor({ task, last, onCollapse, onPatch, onDelete }: {
+function TaskEditor({ task, justCompleted, last, onCollapse, onPatch, onDelete }: {
   task: Task;
+  justCompleted: boolean;
   last: boolean;
   onCollapse: () => void;
   onPatch: (patch: Partial<Task>) => void;
@@ -333,34 +481,50 @@ function TaskEditor({ task, last, onCollapse, onPatch, onDelete }: {
 
   return (
     <div style={{
-      background: 'var(--bg-surface)',
+      background: justCompleted ? 'var(--success-bg)' : 'var(--bg-surface)',
       borderTop: '1px solid var(--border-subtle)',
       borderBottom: last ? 'none' : '1px solid var(--border-subtle)',
       borderLeft: '3px solid var(--path-primary-light-2)',
     }}>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onCollapse}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onCollapse();
+          }
+        }}
         style={{
           display: 'flex', alignItems: 'center', gap: 12, width: '100%',
           padding: '10px 16px', background: 'var(--bg-sunken)', border: 0,
           borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer', textAlign: 'left', color: 'inherit',
         }}
       >
-        <span
+        <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); onPatch({ done: !task.done } as Partial<Task>); }}
+          aria-label={task.done ? 'Mark task incomplete' : 'Mark task complete'}
           style={{
             width: 18, height: 18,
             border: `1.5px solid ${task.done ? 'var(--path-primary)' : 'var(--border-strong)'}`,
             background: task.done ? 'var(--path-primary)' : 'transparent',
             borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            padding: 0,
+            cursor: 'pointer',
           }}>
           {task.done && <Icon name="check" size={12} color="var(--fg-on-primary)" />}
-        </span>
+        </button>
         <span style={{ flex: 1, fontSize: 13.5, color: 'var(--fg-1)', fontWeight: 500, textDecoration: task.done ? 'line-through' : 'none' }}>{task.title}</span>
+        {justCompleted && (
+          <span className="mono" style={{ fontSize: 10, color: 'var(--success-fg)', whiteSpace: 'nowrap' }}>
+            Done
+          </span>
+        )}
         <Avatar who={task.owner} size={20} />
         <Icon name="chevron-up" size={14} color="var(--fg-3)" />
-      </button>
+      </div>
 
       <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* Single line: title (flexes) · due · priority · owner. Wraps on narrow screens. */}

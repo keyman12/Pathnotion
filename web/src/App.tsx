@@ -14,6 +14,7 @@ import { CalendarView } from './views/CalendarView';
 import { JeffView } from './views/JeffView';
 import { SettingsView } from './views/SettingsView';
 import { ReportsView } from './views/ReportsView';
+import { SalesView } from './views/SalesView';
 import { LoginScreen } from './views/LoginScreen';
 import { useBusinessCategories } from './lib/queries';
 
@@ -72,6 +73,7 @@ export function App() {
   // Docs (product + all business modes) run through DocsDriveReal — single Drive-browse view.
   else if (route === 'docs') content = <DocsDriveReal mode="product" />;
   else if (route === 'finance-docs') content = <DocsDriveReal mode="finance" />;
+  else if (route === 'sales') content = <SalesView />;
   else if (route === 'sales-docs') content = <DocsDriveReal mode="sales" />;
   else if (route === 'legal-docs') content = <DocsDriveReal mode="legal" />;
   else if (route === 'tasks') content = <TasksView />;

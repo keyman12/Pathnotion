@@ -10,6 +10,7 @@ import { db } from '../db/client.js';
 import { listMemories, saveToJeffDesk, type JeffMemory } from './jeff.js';
 import { decryptToken } from './token-vault.js';
 import { type GoogleTokens } from './google-calendar.js';
+import { buildSalesSummary, getSalesOpportunity, listSalesOpportunities, type SalesForecastLabel, type SalesStage, type SalesStatus } from './sales-summary.js';
 
 // ─── Tool registry ──────────────────────────────────────────────────────────
 
@@ -178,6 +179,126 @@ register({
     const blocks = db.prepare('SELECT data FROM doc_blocks WHERE doc_id = ? ORDER BY sort_order').all(id) as Array<{ data: string }>;
     const text = blocks.map((b) => { try { return (JSON.parse(b.data) as any).text ?? ''; } catch { return ''; } }).filter(Boolean).join('\n');
     return { ...doc, text: text.slice(0, 6000) };
+  },
+});
+
+register({
+  name: 'sales_summary',
+  description: 'Read the current sales pipeline summary: open pipeline, weighted forecast, commit this month, and opportunities needing attention.',
+  input_schema: {
+    type: 'object',
+    properties: {},
+  },
+  run: async () => buildSalesSummary(),
+});
+
+register({
+  name: 'list_sales_opportunities',
+  description: 'List sales opportunities for pipeline review, follow-up planning, or forecast questions. Can filter by stage, status, owner, or search text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      stage: { type: 'string', enum: ['lead', 'qualified', 'proposal', 'negotiation', 'commit', 'won', 'lost'] },
+      status: { type: 'string', enum: ['active', 'won', 'lost', 'parked'] },
+      owner: { type: 'string', enum: ['D', 'R'] },
+      query: { type: 'string' },
+      limit: { type: 'number' },
+    },
+  },
+  run: async ({ stage, status, owner, query, limit }) =>
+    listSalesOpportunities({
+      stage: stage as SalesStage | undefined,
+      status: status as SalesStatus | undefined,
+      ownerKey: owner,
+      query,
+      limit: clampLimit(limit, 25, 100),
+    }),
+});
+
+register({
+  name: 'read_sales_opportunity',
+  description: 'Read a single sales opportunity, including contact details, forecast, linked docs, and timeline notes.',
+  input_schema: {
+    type: 'object',
+    properties: { id: { type: 'string', description: 'Opportunity id, e.g. CRM-014.' } },
+    required: ['id'],
+  },
+  run: async ({ id }) => getSalesOpportunity(String(id)),
+});
+
+register({
+  name: 'add_sales_note',
+  description: 'Append a note to a sales opportunity timeline after the founder asks Jeff to record a sales update.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      opportunityId: { type: 'string' },
+      note: { type: 'string' },
+      author: { type: 'string', enum: ['D', 'R', 'J'] },
+    },
+    required: ['opportunityId', 'note'],
+  },
+  run: async ({ opportunityId, note, author }) => {
+    const opp = getSalesOpportunity(String(opportunityId));
+    if (!opp) return { error: 'Opportunity not found' };
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO sales_activities (id, opportunity_id, type, body, author_key)
+      VALUES (?, ?, 'note', ?, ?)
+    `).run(id, opportunityId, note, author ?? 'J');
+    db.prepare(`UPDATE sales_opportunities SET updated_at = datetime('now') WHERE id = ?`).run(opportunityId);
+    return getSalesOpportunity(String(opportunityId));
+  },
+});
+
+register({
+  name: 'patch_sales_opportunity',
+  description: 'Update simple sales opportunity fields when the founder explicitly asks Jeff to change the CRM record.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      stage: { type: 'string', enum: ['lead', 'qualified', 'proposal', 'negotiation', 'commit', 'won', 'lost'] },
+      status: { type: 'string', enum: ['active', 'won', 'lost', 'parked'] },
+      forecastLabel: { type: 'string', enum: ['pipeline', 'best_case', 'commit'] },
+      forecastProbability: { type: 'number' },
+      nextAction: { type: 'string' },
+      nextActionDate: { type: 'string', description: 'ISO date YYYY-MM-DD.' },
+      expectedCloseDate: { type: 'string', description: 'ISO date YYYY-MM-DD.' },
+      owner: { type: 'string', enum: ['D', 'R'] },
+      note: { type: 'string', description: 'Optional timeline note explaining the change.' },
+    },
+    required: ['id'],
+  },
+  run: async ({ id, stage, status, forecastLabel, forecastProbability, nextAction, nextActionDate, expectedCloseDate, owner, note }) => {
+    const current = getSalesOpportunity(String(id));
+    if (!current) return { error: 'Opportunity not found' };
+    const sets: string[] = [];
+    const params: any[] = [];
+    const add = (col: string, value: unknown) => {
+      if (value === undefined) return;
+      sets.push(`${col} = ?`);
+      params.push(value);
+    };
+    add('stage', stage as SalesStage | undefined);
+    add('status', status as SalesStatus | undefined);
+    add('forecast_label', forecastLabel as SalesForecastLabel | undefined);
+    if (forecastProbability !== undefined) add('forecast_probability', Math.max(0, Math.min(100, Number(forecastProbability))));
+    add('next_action', nextAction);
+    add('next_action_date', nextActionDate);
+    add('expected_close_date', expectedCloseDate);
+    add('owner_key', owner);
+    if (sets.length) {
+      params.push(id);
+      db.prepare(`UPDATE sales_opportunities SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...params);
+    }
+    if (note) {
+      db.prepare(`
+        INSERT INTO sales_activities (id, opportunity_id, type, body, author_key)
+        VALUES (?, ?, 'jeff', ?, 'J')
+      `).run(randomUUID(), id, note);
+    }
+    return getSalesOpportunity(String(id));
   },
 });
 

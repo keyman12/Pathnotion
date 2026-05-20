@@ -70,7 +70,10 @@ export function Dropdown<V extends string | number>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => !disabled && setOpen((o) => !o)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled) setOpen((o) => !o);
+        }}
         onKeyDown={(e) => {
           if (disabled) return;
           if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
@@ -129,8 +132,18 @@ export function Dropdown<V extends string | number>({
                 key={String(o.value)}
                 role="option"
                 aria-selected={isSelected}
-                onClick={() => { onChange(o.value); setOpen(false); buttonRef.current?.focus(); }}
-                className="row-hover"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onChange(o.value);
+                  setOpen(false);
+                  buttonRef.current?.focus();
+                }}
+                className={`dropdown-option row-hover ${isSelected ? 'is-selected' : ''}`}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -139,7 +152,6 @@ export function Dropdown<V extends string | number>({
                   borderRadius: 4,
                   fontSize: 13,
                   color: 'var(--fg-1)',
-                  background: isSelected ? 'var(--path-primary-tint)' : 'transparent',
                   cursor: 'pointer',
                 }}
               >

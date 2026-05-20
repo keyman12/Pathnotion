@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db/client.js';
+import { pushTaskToGoogle, removeTaskFromGoogle, syncGoogleTasksForUser } from '../services/google-tasks-sync.js';
 
 export const tasksRouter = Router();
 
@@ -18,6 +19,11 @@ const SELECT_TASK = `
          done,
          priority,
          attachments AS attachmentsJson,
+         google_task_id AS googleTaskId,
+         google_task_list_id AS googleTaskListId,
+         google_owner_key AS googleOwnerKey,
+         google_web_link AS googleWebLink,
+         last_synced_at AS lastSyncedAt,
          sort_order AS sortOrder
   FROM tasks
 `;
@@ -30,6 +36,11 @@ type TaskRow = {
   done: number;
   priority: string | null;
   attachmentsJson: string | null;
+  googleTaskId: string | null;
+  googleTaskListId: string | null;
+  googleOwnerKey: string | null;
+  googleWebLink: string | null;
+  lastSyncedAt: string | null;
   sortOrder: number;
 };
 
@@ -49,6 +60,11 @@ function mapTask(row: TaskRow) {
     done: Boolean(row.done),
     priority: row.priority,
     attachments,
+    googleTaskId: row.googleTaskId,
+    googleTaskListId: row.googleTaskListId,
+    googleOwnerKey: row.googleOwnerKey,
+    googleWebLink: row.googleWebLink,
+    lastSyncedAt: row.lastSyncedAt,
     sortOrder: row.sortOrder,
   };
 }
@@ -68,7 +84,7 @@ const createSchema = z.object({
   attachments: z.array(attachmentSchema).optional(),
 });
 
-tasksRouter.post('/', (req, res) => {
+tasksRouter.post('/', async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS n FROM tasks').get() as { n: number }).n;
@@ -83,6 +99,8 @@ tasksRouter.post('/', (req, res) => {
     attachments: parsed.data.attachments ? JSON.stringify(parsed.data.attachments) : null,
     sort_order: maxOrder + 1,
   });
+  const sync = await pushTaskToGoogle(Number(info.lastInsertRowid));
+  if (!sync.ok) console.warn('[tasks] Google create sync failed:', sync.error);
   const row = db.prepare(SELECT_TASK + ' WHERE id = ?').get(info.lastInsertRowid) as TaskRow;
   res.status(201).json(mapTask(row));
 });
@@ -97,9 +115,11 @@ const patchSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
-tasksRouter.patch('/:id', (req, res) => {
+tasksRouter.patch('/:id', async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+  const existing = db.prepare(SELECT_TASK + ' WHERE id = ?').get(req.params.id) as TaskRow | undefined;
+  if (!existing) return res.status(404).json({ error: 'Not found' });
 
   const sets: string[] = [];
   const params: Record<string, unknown> = { id: req.params.id };
@@ -118,12 +138,29 @@ tasksRouter.patch('/:id', (req, res) => {
 
   const result = db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = @id`).run(params);
   if (!result.changes) return res.status(404).json({ error: 'Not found' });
+  const sync = await pushTaskToGoogle(Number(req.params.id), existing.owner);
+  if (!sync.ok) console.warn('[tasks] Google patch sync failed:', sync.error);
   const row = db.prepare(SELECT_TASK + ' WHERE id = ?').get(req.params.id) as TaskRow;
   res.json(mapTask(row));
 });
 
-tasksRouter.delete('/:id', (req, res) => {
+tasksRouter.delete('/:id', async (req, res) => {
+  const existing = db.prepare(SELECT_TASK + ' WHERE id = ?').get(req.params.id) as TaskRow | undefined;
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  try {
+    await removeTaskFromGoogle(existing);
+  } catch (err) {
+    console.warn('[tasks] Google delete sync failed:', (err as Error).message);
+  }
   const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
   if (!result.changes) return res.status(404).json({ error: 'Not found' });
   res.status(204).send();
+});
+
+tasksRouter.post('/sync', async (req, res) => {
+  const key = req.session?.userKey;
+  if (!key) return res.status(401).json({ error: 'Not authenticated' });
+  const result = await syncGoogleTasksForUser(key);
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
 });

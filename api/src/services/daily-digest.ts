@@ -1,5 +1,6 @@
 import { db } from '../db/client.js';
 import { sendMail } from './mailer.js';
+import { buildSalesSummary, type SalesSummary } from './sales-summary.js';
 
 interface UserRow {
   id: number;
@@ -20,9 +21,10 @@ interface Sections {
   overdue: boolean;
   tasks: boolean;
   upcoming: boolean;
+  sales: boolean;
 }
 
-const DEFAULT_SECTIONS: Sections = { meetings: true, overdue: true, tasks: true, upcoming: true };
+const DEFAULT_SECTIONS: Sections = { meetings: true, overdue: true, tasks: true, upcoming: true, sales: true };
 
 function getPrefs(userId: number): (PrefsRow & { sectionsParsed: Sections }) | null {
   const row = db.prepare(`
@@ -51,6 +53,7 @@ export interface DigestContent {
   overdue: Array<{ id: string; title: string; product: string; due: string }>;
   tasks: Array<{ id: number; title: string; due: string; owner: string }>;
   upcomingBacklog: Array<{ id: string; title: string; product: string; stage: string }>;
+  sales: SalesSummary;
 }
 
 export function buildDigest(userId: number): DigestContent | null {
@@ -107,6 +110,7 @@ export function buildDigest(userId: number): DigestContent | null {
     overdue: overdueRows,
     tasks: taskRows,
     upcomingBacklog: upcomingRows,
+    sales: buildSalesSummary(),
   };
 }
 
@@ -164,7 +168,21 @@ export function renderDigest(content: DigestContent, sections: Sections): { subj
     lines.push('');
   }
 
-  if (!content.meetings.length && !content.overdue.length && !content.tasks.length && !content.upcomingBacklog.length) {
+  if (sections.sales && content.sales.activeCount) {
+    const rows = salesDigestRows(content.sales);
+    lines.push('Sales:');
+    lines.push(`  · ${money(content.sales.openPipeline)} open, ${money(content.sales.weightedForecast)} weighted, ${money(content.sales.commitWeightedThisMonth)} commit weighted this month`);
+    htmlParts.push(section('Sales'));
+    htmlParts.push(`<div style="padding:10px 0 8px;border-bottom:1px solid #EAECF0;"><div style="font-weight:600;">${money(content.sales.openPipeline)} open · ${money(content.sales.weightedForecast)} weighted</div><div style="font-size:12px;color:#747973;">${content.sales.needsAttention} need attention · ${money(content.sales.commitWeightedThisMonth)} commit weighted this month</div></div>`);
+    for (const o of rows) {
+      const flag = o.attentionFlags[0]?.label ?? `${o.forecastProbability}% forecast`;
+      lines.push(`  · ${o.accountName}  ${money(o.valueAmount)}  (${flag})`);
+      htmlParts.push(`<div style="padding:8px 0;border-bottom:1px solid #EAECF0;"><span style="font-weight:500;">${escape(o.accountName)}</span> <span style="font-size:12px;color:#747973;">${escape(o.nextAction ?? o.name)}</span><div style="font-size:11px;color:#B54708;">${escape(flag)} · ${money(o.valueAmount)}</div></div>`);
+    }
+    lines.push('');
+  }
+
+  if (!content.meetings.length && !content.overdue.length && !content.tasks.length && !content.upcomingBacklog.length && (!sections.sales || !content.sales.activeCount)) {
     lines.push('Nothing outstanding — enjoy your day.');
     htmlParts.push(`<div style="padding:20px 0;color:#747973;font-size:13px;">Nothing outstanding — enjoy your day.</div>`);
   }
@@ -188,6 +206,22 @@ function escape(s: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function money(value: number): string {
+  return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(value || 0);
+}
+
+function salesDigestRows(summary: SalesSummary) {
+  const seen = new Set<string>();
+  return [summary.dueToday, summary.overdue, summary.closeSoon, summary.attention]
+    .flat()
+    .filter((o) => {
+      if (seen.has(o.id)) return false;
+      seen.add(o.id);
+      return true;
+    })
+    .slice(0, 5);
 }
 
 export async function sendDigestToUser(userId: number): Promise<{ ok: true } | { ok: false; reason: string }> {

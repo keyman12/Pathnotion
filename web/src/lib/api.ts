@@ -1,4 +1,4 @@
-import type { AccessGrant, AgentJob, AgentRun, BacklogItem, CalendarEvent, Doc, DocBlock, Product, Task } from './types';
+import type { AccessGrant, AgentJob, AgentRun, BacklogItem, CalendarEvent, Doc, DocBlock, Product, SalesActivity, SalesLink, SalesOpportunity, SalesSummary, Task } from './types';
 
 const BASE = '/api';
 
@@ -76,6 +76,51 @@ export const api = {
     patch: (id: number, body: Partial<Task>) =>
       fetchJson<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id: number) => fetchJson<void>(`/tasks/${id}`, { method: 'DELETE' }),
+    sync: () => fetchJson<{ ok: boolean; pushed: number; inserted: number; updated: number; deleted: number }>('/tasks/sync', { method: 'POST' }),
+  },
+  sales: {
+    opportunities: () => fetchJson<SalesOpportunity[]>('/sales/opportunities'),
+    opportunity: (id: string) => fetchJson<SalesOpportunity>(`/sales/opportunities/${id}`),
+    createOpportunity: (body: Partial<SalesOpportunity> & {
+      name: string;
+      accountName: string;
+      contactName: string;
+      valueAmount?: number;
+      document?: { linkType: SalesLink['linkType']; linkRef: string; label?: string | null };
+    }) => fetchJson<SalesOpportunity>('/sales/opportunities', { method: 'POST', body: JSON.stringify(body) }),
+    patchOpportunity: (id: string, body: Partial<SalesOpportunity> & { note?: string | null }) =>
+      fetchJson<SalesOpportunity>(`/sales/opportunities/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    removeOpportunity: (id: string) => fetchJson<void>(`/sales/opportunities/${id}`, { method: 'DELETE' }),
+    reorder: (items: Array<{ id: string; sortOrder: number; stage?: SalesOpportunity['stage'] }>) =>
+      fetchJson<void>('/sales/opportunities/reorder', { method: 'POST', body: JSON.stringify(items) }),
+    findLinkedIn: (id: string) =>
+      fetchJson<{ opportunity: SalesOpportunity; link?: SalesLink }>(`/sales/opportunities/${id}/enrich/linkedin`, { method: 'POST' }),
+    createBrief: (id: string) =>
+      fetchJson<{ opportunity: SalesOpportunity; link?: SalesLink; docId?: string; summary?: string }>(`/sales/opportunities/${id}/enrich/brief`, { method: 'POST' }),
+    summary: () => fetchJson<SalesSummary>('/sales/summary'),
+    activities: (opportunityId: string) => fetchJson<SalesActivity[]>(`/sales/activities?opportunity=${encodeURIComponent(opportunityId)}`),
+    createActivity: (body: { opportunityId: string; type?: SalesActivity['type']; body: string; authorKey?: string | null }) =>
+      fetchJson<SalesActivity>('/sales/activities', { method: 'POST', body: JSON.stringify(body) }),
+    createLink: (body: { opportunityId: string; linkType: SalesLink['linkType']; linkRef: string; label?: string | null }) =>
+      fetchJson<SalesLink>('/sales/links', { method: 'POST', body: JSON.stringify(body) }),
+    openLink: (id: string) => fetchJson<{ url: string; link: SalesLink }>(`/sales/links/${id}/open`, { method: 'POST' }),
+    removeLink: (id: string) => fetchJson<void>(`/sales/links/${id}`, { method: 'DELETE' }),
+    uploadAttachment: async (opportunityId: string, file: File): Promise<SalesLink> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/sales/opportunities/${encodeURIComponent(opportunityId)}/attachments`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      if (!res.ok) {
+        const err = new Error(`${res.status} ${res.statusText}`) as ApiError;
+        err.status = res.status;
+        try { err.message = (await res.json()).error ?? err.message; } catch { /* ignore */ }
+        throw err;
+      }
+      return res.json() as Promise<SalesLink>;
+    },
   },
   calendar: {
     events: () => fetchJson<CalendarEvent[]>('/calendar/events'),
@@ -291,6 +336,9 @@ export interface GoogleCalendarStatus {
   email?: string | null;
   connectedAt?: string | null;
   lastSyncAt?: string | null;
+  tasksLastSyncAt?: string | null;
+  hasTasksScope?: boolean;
+  requiresTasksReconnect?: boolean;
 }
 
 export interface DriveWorkspaceConfig {
@@ -471,7 +519,7 @@ export interface JeffPinnedFolder {
 export interface NotificationPrefs {
   enabled: boolean;
   deliveryTime: string;
-  sections: { meetings: boolean; overdue: boolean; tasks: boolean; upcoming: boolean };
+  sections: { meetings: boolean; overdue: boolean; tasks: boolean; upcoming: boolean; sales: boolean };
   lastSentDate: string | null;
   updatedAt: string;
 }

@@ -29,6 +29,7 @@ import {
   useUnpinFolder,
   useUploadToDriveFolder,
 } from '../lib/queries';
+import { useUI } from '../lib/store';
 import type { FounderKey, Product } from '../lib/types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -138,6 +139,8 @@ export function DocsDriveReal({ mode = 'product' }: { mode?: DocsMode }) {
   const cfgQ = useDriveConfig();
   const cfg = cfgQ.data;
   const header = MODE_CONFIG[mode];
+  const focusDocId = useUI((s) => s.focusDocId);
+  const clearDocFocus = useUI((s) => s.clearDocFocus);
 
   // null folderId = drive root. 'articles' virtual view shows every article across every folder.
   // Default to the "All articles" view on entry — feels more like a dashboard than dropping users
@@ -159,6 +162,14 @@ export function DocsDriveReal({ mode = 'product' }: { mode?: DocsMode }) {
       setCurrentFolderId(cfg.driveId);
     }
   }, [cfg?.driveId, currentFolderId]);
+
+  useEffect(() => {
+    if (!focusDocId) return;
+    setVirtualView('articles');
+    setSelectedFileId(null);
+    setSelectedArticleId(focusDocId);
+    clearDocFocus();
+  }, [focusDocId, clearDocFocus]);
 
   if (!cfg?.driveId) {
     return (

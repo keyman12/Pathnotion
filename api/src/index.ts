@@ -21,8 +21,10 @@ import { productsRouter } from './routes/products.js';
 import { businessCategoriesRouter } from './routes/business-categories.js';
 import { driveRouter } from './routes/drive.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { salesRouter } from './routes/sales.js';
 import { startDigestScheduler } from './services/daily-digest.js';
 import { startCalendarSyncScheduler } from './services/calendar-sync.js';
+import { startGoogleTasksSyncScheduler } from './services/google-tasks-sync.js';
 import { startScheduler as startJeffScheduler } from './services/jeff-scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,7 @@ app.use('/api/agent', requireAuth, agentRouter);
 app.use('/api/business-categories', requireAuth, businessCategoriesRouter);
 app.use('/api/drive', requireAuth, driveRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
+app.use('/api/sales', requireAuth, salesRouter);
 
 // In prod, serve the built web bundle from this same server. Nginx proxies everything to us
 // on one upstream, which keeps the deploy story simple (one process, one nginx location).
@@ -104,5 +107,6 @@ app.listen(port, host, () => {
   console.log(`PathNotion API listening on ${host}:${port}`);
   startDigestScheduler();
   startCalendarSyncScheduler(5);
+  startGoogleTasksSyncScheduler(5);
   startJeffScheduler();
 });

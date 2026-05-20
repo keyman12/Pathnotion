@@ -5,7 +5,7 @@ import { sendDigestToUser } from '../services/daily-digest.js';
 
 export const notificationsRouter = Router();
 
-const DEFAULT_SECTIONS = { meetings: true, overdue: true, tasks: true, upcoming: true };
+const DEFAULT_SECTIONS = { meetings: true, overdue: true, tasks: true, upcoming: true, sales: true };
 
 function ensurePrefs(userId: number) {
   db.prepare(`
@@ -41,6 +41,7 @@ const patchSchema = z.object({
     overdue: z.boolean().optional(),
     tasks: z.boolean().optional(),
     upcoming: z.boolean().optional(),
+    sales: z.boolean().optional(),
   }).optional(),
 });
 

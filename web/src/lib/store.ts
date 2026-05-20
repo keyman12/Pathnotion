@@ -10,10 +10,13 @@ interface UIState {
   mobileMenuOpen: boolean;
   /** Set when another view wants the Backlog to land with a specific item already expanded. */
   focusBacklogId: string | null;
+  /** Set when another view wants Docs to open a specific article. */
+  focusDocId: string | null;
   /** Prefill text for the Jeff chat. Cleared after the chat picks it up. */
   jeffPrefill: string | null;
-  navigate: (r: Route, focusBacklogId?: string | null) => void;
+  navigate: (r: Route, focusId?: string | null) => void;
   clearBacklogFocus: () => void;
+  clearDocFocus: () => void;
   askJeff: (prompt: string) => void;
   clearJeffPrefill: () => void;
   setTheme: (t: 'dark' | 'light') => void;
@@ -49,12 +52,21 @@ export const useUI = create<UIState>((set) => ({
   searchOpen: false,
   mobileMenuOpen: false,
   focusBacklogId: null,
+  focusDocId: null,
   jeffPrefill: null,
-  navigate: (r, focusBacklogId) => {
+  navigate: (r, focusId) => {
     try { localStorage.setItem('path:route', r); } catch { /* ignore */ }
-    set({ route: r, searchOpen: false, mobileMenuOpen: false, focusBacklogId: focusBacklogId ?? null });
+    const isDocsRoute = r === 'docs' || r === 'finance-docs' || r === 'sales-docs' || r === 'legal-docs';
+    set({
+      route: r,
+      searchOpen: false,
+      mobileMenuOpen: false,
+      focusBacklogId: r === 'backlog' ? (focusId ?? null) : null,
+      focusDocId: isDocsRoute ? (focusId ?? null) : null,
+    });
   },
   clearBacklogFocus: () => set({ focusBacklogId: null }),
+  clearDocFocus: () => set({ focusDocId: null }),
   /** Jump to Jeff with a prefilled draft. Used by "Ask Jeff" shortcuts from other views. */
   askJeff: (prompt) => {
     try { localStorage.setItem('path:route', 'jeff'); } catch { /* ignore */ }

@@ -26,6 +26,14 @@ try { db.exec('ALTER TABLE backlog_items ADD COLUMN link_ref TEXT'); } catch { /
 try { db.exec('ALTER TABLE backlog_items ADD COLUMN attachments TEXT'); } catch { /* already present */ }
 try { db.exec('ALTER TABLE tasks ADD COLUMN attachments TEXT'); } catch { /* already present */ }
 try { db.exec('ALTER TABLE tasks ADD COLUMN priority TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_task_id TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_task_list_id TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_owner_key TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_etag TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_updated_at TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN google_web_link TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE tasks ADD COLUMN last_synced_at TEXT'); } catch { /* already present */ }
+try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_google_id ON tasks(google_task_list_id, google_task_id)'); } catch { /* already present */ }
 // One-time migration: fold legacy link_type/link_ref into a single attachment for any task
 // that still has them but no attachments payload.
 try {
@@ -46,6 +54,7 @@ try { db.exec('ALTER TABLE calendar_sources ADD COLUMN token_expiry INTEGER'); }
 try { db.exec('ALTER TABLE calendar_sources ADD COLUMN scope TEXT'); } catch { /* already present */ }
 try { db.exec('ALTER TABLE calendar_sources ADD COLUMN connected_at TEXT'); } catch { /* already present */ }
 try { db.exec('ALTER TABLE calendar_sources ADD COLUMN sync_token TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE calendar_sources ADD COLUMN tasks_last_sync_at TEXT'); } catch { /* already present */ }
 
 // Calendar events — columns added to support real external syncing beyond the demo shape.
 try { db.exec('ALTER TABLE calendar_events ADD COLUMN source_id INTEGER'); } catch { /* already present */ }
@@ -82,6 +91,113 @@ db.exec(`
 // Jeff's scan cap — how many Drive files the scan job will read per run. Lives on workspace_config
 // so it's a single knob, easy to reason about.
 try { db.exec('ALTER TABLE workspace_config ADD COLUMN jeff_scan_cap INTEGER NOT NULL DEFAULT 40'); } catch { /* already present */ }
+
+// Lightweight Sales CRM. Account and contact fields deliberately live on the opportunity in v1.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sales_opportunities (
+    id                    TEXT PRIMARY KEY,
+    name                  TEXT NOT NULL,
+    account_name          TEXT NOT NULL,
+    contact_name          TEXT NOT NULL,
+    contact_title         TEXT,
+    contact_location      TEXT,
+    contact_photo_url     TEXT,
+    contact_phone         TEXT,
+    contact_email         TEXT,
+    website               TEXT,
+    owner_key             TEXT NOT NULL,
+    stage                 TEXT NOT NULL DEFAULT 'lead',
+    status                TEXT NOT NULL DEFAULT 'active',
+    value_amount          REAL NOT NULL DEFAULT 0,
+    currency              TEXT NOT NULL DEFAULT 'GBP',
+    forecast_label        TEXT NOT NULL DEFAULT 'pipeline',
+    forecast_probability  INTEGER NOT NULL DEFAULT 10,
+    expected_close_date   TEXT,
+    next_action           TEXT,
+    next_action_date      TEXT,
+    notes                 TEXT,
+    sort_order            INTEGER NOT NULL DEFAULT 0,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+try { db.exec('ALTER TABLE sales_opportunities ADD COLUMN contact_title TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE sales_opportunities ADD COLUMN contact_location TEXT'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE sales_opportunities ADD COLUMN contact_photo_url TEXT'); } catch { /* already present */ }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_opportunities_stage ON sales_opportunities(stage)'); } catch { /* already present */ }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_opportunities_status ON sales_opportunities(status)'); } catch { /* already present */ }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_opportunities_close ON sales_opportunities(expected_close_date)'); } catch { /* already present */ }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_opportunities_next_action ON sales_opportunities(next_action_date)'); } catch { /* already present */ }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sales_activities (
+    id              TEXT PRIMARY KEY,
+    opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL DEFAULT 'note',
+    body            TEXT NOT NULL,
+    author_key      TEXT,
+    activity_date   TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_activities_opportunity ON sales_activities(opportunity_id)'); } catch { /* already present */ }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sales_links (
+    id              TEXT PRIMARY KEY,
+    opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
+    link_type       TEXT NOT NULL,
+    link_ref        TEXT NOT NULL,
+    label           TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_links_opportunity ON sales_links(opportunity_id)'); } catch { /* already present */ }
+
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO sales_opportunities (
+      id, name, account_name, contact_name, contact_phone, contact_email, website,
+      owner_key, stage, status, value_amount, currency, forecast_label, forecast_probability,
+      expected_close_date, next_action, next_action_date, notes, sort_order, updated_at
+    )
+    VALUES
+      ('CRM-014', 'Core payments rollout', 'Acme Bank', 'Maya Shah', '+44 20 7946 0142', 'maya.shah@acmebank.example', 'acmebank.example',
+       'D', 'commit', 'active', 42000, 'GBP', 'commit', 85, '2026-05-28', 'Call Maya after board review', date('now'),
+       'Wants commercial confirmation on settlement timeline. Raj to validate implementation cost before final quote.', 10, datetime('now')),
+      ('CRM-018', 'Proposal pack', 'Northstar Payments', 'Oliver Trent', '+44 161 555 0182', 'oliver@northstar.example', 'northstar.example',
+       'R', 'proposal', 'active', 78000, 'GBP', 'best_case', 65, '2026-06-12', 'Send pricing response', date('now','-1 day'),
+       'CFO asked for pricing questions to be answered before legal redlines.', 20, datetime('now','-2 days')),
+      ('CRM-021', 'Enterprise negotiation', 'Helio Retail Group', 'Priya Nair', null, 'priya@helio.example', 'helio.example',
+       'D', 'negotiation', 'active', 54000, 'GBP', 'pipeline', 50, '2026-05-30', 'Book legal call', date('now','+3 days'),
+       'No update for 17 days. Needs sponsor confirmation.', 30, datetime('now','-17 days')),
+      ('CRM-024', 'Partner intro', 'Mosaic Capital', 'Elena Morris', null, 'elena@mosaic.example', null,
+       'D', 'lead', 'active', 25000, 'GBP', 'pipeline', 30, '2026-07-03', 'Find sponsor', date('now','+7 days'),
+       'Intro from partner. Website and phone still missing.', 40, datetime('now','-1 day')),
+      ('CRM-027', 'Treasury workflow', 'Kite Treasury', 'Anika Patel', '+44 20 5555 0148', 'anika@kite.example', 'kite.example',
+       'R', 'commit', 'active', 78000, 'GBP', 'commit', 95, '2026-05-24', 'Final procurement step', date('now','+1 day'),
+       'Procurement confirmed. Waiting for final order reference.', 50, datetime('now')),
+      ('CRM-030', 'Discovery workshop', 'UrbanPay', 'Sam Hughes', '+44 20 5555 0192', 'sam@urbanpay.example', 'urbanpay.example',
+       'D', 'qualified', 'active', 33000, 'GBP', 'pipeline', 40, '2026-06-21', 'Send discovery notes', date('now','+2 days'),
+       'Discovery notes linked. Next step is a technical workshop.', 60, datetime('now','-3 days'))
+  `).run();
+  db.prepare(`
+    INSERT OR IGNORE INTO sales_activities (id, opportunity_id, type, body, author_key, activity_date)
+    VALUES
+      ('sa-crm014-1', 'CRM-014', 'link', 'Proposal linked: Acme Bank proposal', 'D', datetime('now','-3 days')),
+      ('sa-crm014-2', 'CRM-014', 'stage', 'Stage moved to Commit. Probability moved to 85%.', 'D', datetime('now','-1 day')),
+      ('sa-crm014-3', 'CRM-014', 'jeff', 'Jeff prepared meeting brief and suggested objection: integration risk.', 'J', datetime('now')),
+      ('sa-crm018-1', 'CRM-018', 'note', 'CFO pricing questions are overdue.', 'R', datetime('now','-2 days')),
+      ('sa-crm021-1', 'CRM-021', 'note', 'Deal is stale. Needs a legal call.', 'D', datetime('now','-17 days'))
+  `).run();
+  db.prepare(`
+    INSERT OR IGNORE INTO sales_links (id, opportunity_id, link_type, link_ref, label)
+    VALUES
+      ('sl-crm014-proposal', 'CRM-014', 'doc', 's4', 'Acme Bank proposal'),
+      ('sl-crm018-pricing', 'CRM-018', 'doc', 's4', 'Northstar pricing notes'),
+      ('sl-crm030-notes', 'CRM-030', 'doc', 's3', 'Discovery notes')
+  `).run();
+} catch { /* ignore */ }
 
 // Folders the founders have explicitly pinned for Jeff to scan. If the set is non-empty, the
 // scan job walks only those folders. If empty, it falls back to walking from the shared-drive root.

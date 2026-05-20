@@ -629,8 +629,8 @@ function CalendarTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ fontSize: 12.5, color: 'var(--fg-3)', maxWidth: 640 }}>
-        Each person connects their own Google Calendar. Events sync in both directions — changes here push
-        back to your Google calendar, and changes in Google flow in.
+        Each person connects their own Google account. Calendar events and tasks sync in both directions;
+        Drive access lets Jeff and Docs use files you choose.
       </div>
 
       <div style={{
@@ -658,13 +658,13 @@ function CalendarTab() {
           </div>
           {s?.configured && !s.connected && (
             <button className="btn btn-primary" onClick={startConnect} disabled={connect.isPending}>
-              <Icon name="plus" size={13} /> {connect.isPending ? 'Opening…' : 'Connect Google Calendar'}
+              <Icon name="plus" size={13} /> {connect.isPending ? 'Opening…' : 'Connect Google'}
             </button>
           )}
           {s?.connected && (
             <button
               className="btn btn-ghost"
-              onClick={() => { if (confirm('Disconnect Google Calendar? Your synced events will remain.')) disconnect.mutate(); }}
+              onClick={() => { if (confirm('Disconnect Google? Your synced events and tasks will remain.')) disconnect.mutate(); }}
               disabled={disconnect.isPending}
             >
               Disconnect
@@ -677,6 +677,11 @@ function CalendarTab() {
             <button className="btn btn-ghost" onClick={runTest} disabled={test.isPending}>
               {test.isPending ? 'Testing…' : 'Test connection'}
             </button>
+            {s.requiresTasksReconnect && (
+              <button className="btn btn-ghost" onClick={startConnect} disabled={connect.isPending}>
+                <Icon name="plus" size={13} /> {connect.isPending ? 'Opening…' : 'Grant Tasks access'}
+              </button>
+            )}
             {s.lastSyncAt && (
               <span className="mono" style={{ fontSize: 10, color: 'var(--fg-4)' }}>
                 Last sync: {s.lastSyncAt}
@@ -687,6 +692,18 @@ function CalendarTab() {
                 {testResult.msg}
               </span>
             )}
+          </div>
+        )}
+        {s?.requiresTasksReconnect && (
+          <div style={{
+            padding: '10px 12px',
+            border: '1px solid var(--warning-fg)',
+            borderRadius: 8,
+            background: 'var(--warning-bg)',
+            color: 'var(--warning-fg)',
+            fontSize: 12.5,
+          }}>
+            Google Tasks permission is missing from this connection. Calendar and Drive will keep working, but Tasks need one fresh Google consent.
           </div>
         )}
       </div>
@@ -703,14 +720,14 @@ function NotificationsTab() {
   const prefs: NotificationPrefs | undefined = prefsQ.data;
   const [enabled, setEnabled] = useState(prefs?.enabled ?? true);
   const [time, setTime] = useState(prefs?.deliveryTime ?? '07:00');
-  const [sections, setSections] = useState(prefs?.sections ?? { meetings: true, overdue: true, tasks: true, upcoming: true });
+  const [sections, setSections] = useState(prefs?.sections ?? { meetings: true, overdue: true, tasks: true, upcoming: true, sales: true });
 
   useEffect(() => {
     if (!prefs) return;
     setEnabled(prefs.enabled);
     setTime(prefs.deliveryTime);
     setSections(prefs.sections);
-  }, [prefs?.enabled, prefs?.deliveryTime, prefs?.sections?.meetings, prefs?.sections?.overdue, prefs?.sections?.tasks, prefs?.sections?.upcoming]);
+  }, [prefs?.enabled, prefs?.deliveryTime, prefs?.sections?.meetings, prefs?.sections?.overdue, prefs?.sections?.tasks, prefs?.sections?.upcoming, prefs?.sections?.sales]);
 
   const save = () => {
     patch.mutate({ enabled, deliveryTime: time, sections });
@@ -764,6 +781,7 @@ function NotificationsTab() {
             <ToggleRow small label="Overdue backlog items" value={sections.overdue} onChange={(v) => setSections({ ...sections, overdue: v })} />
             <ToggleRow small label="Tasks due today / tomorrow" value={sections.tasks} onChange={(v) => setSections({ ...sections, tasks: v })} />
             <ToggleRow small label="Up next (backlog)" value={sections.upcoming} onChange={(v) => setSections({ ...sections, upcoming: v })} />
+            <ToggleRow small label="Sales pipeline summary" value={sections.sales} onChange={(v) => setSections({ ...sections, sales: v })} />
           </div>
         </div>
 
