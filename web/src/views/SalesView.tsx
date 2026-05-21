@@ -412,6 +412,7 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
   const createBrief = useCreateSalesBrief();
   const opportunity = opportunityQ.data;
   const [note, setNote] = useState('');
+  const [noteActionDate, setNoteActionDate] = useState('');
   const [draft, setDraft] = useState<Partial<SalesOpportunity>>({});
   const [filesBusy, setFilesBusy] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -448,11 +449,12 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
     setSaveState('saving');
     try {
       await Promise.all([
-        patch.mutateAsync({ id, patch: { ...draft, note: note.trim() || undefined } }),
+        patch.mutateAsync({ id, patch: { ...draft, note: note.trim() || undefined, noteActionDate: note.trim() && noteActionDate ? noteActionDate : undefined } }),
         delay(500),
       ]);
       setDraft({});
       setNote('');
+      setNoteActionDate('');
       setSaveState('saved');
     } catch {
       setSaveState('idle');
@@ -534,9 +536,11 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
           <Field label="Phone"><input className="input" value={value.contactPhone ?? ''} onChange={(e) => update('contactPhone', e.target.value)} /></Field>
           <Field label="Email" error={emailError}><input className={`input ${emailError ? 'is-invalid' : ''}`} type="email" value={value.contactEmail ?? ''} onChange={(e) => update('contactEmail', e.target.value)} /></Field>
           <Field label="Website" error={websiteError}><input className={`input ${websiteError ? 'is-invalid' : ''}`} inputMode="url" value={value.website ?? ''} onChange={(e) => update('website', e.target.value)} /></Field>
-          <Field label="Note" wide>
-            <textarea className="input" rows={3} value={note} onChange={(e) => { setSaveState('idle'); setNote(e.target.value); }} placeholder="Add the latest note. Saving changes adds it to the timeline." />
-            <p className="fg-3" style={{ fontSize: 12, marginTop: 6 }}>Saving changes adds this note to the timeline.</p>
+          <Field label="Notes / next action" wide>
+            <div className="sales-note-input">
+              <textarea className="input" rows={3} value={note} onChange={(e) => { setSaveState('idle'); setNote(e.target.value); }} placeholder="Add the latest note or next action." />
+              <DateIconButton value={noteActionDate} onChange={(v) => { setSaveState('idle'); setNoteActionDate(v); }} />
+            </div>
           </Field>
         </div>
         <FilesSection
@@ -800,15 +804,24 @@ function MoneyInput({ value, onChange }: { value: number; onChange: (value: numb
 }
 
 function DateTextInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
+  const suppressOpenUntil = useRef(0);
   const openPicker = () => {
+    if (Date.now() < suppressOpenUntil.current) return;
     const picker = pickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
     if (picker?.showPicker) picker.showPicker();
     else picker?.click();
   };
+  const closePicker = () => {
+    suppressOpenUntil.current = Date.now() + 450;
+    pickerRef.current?.blur();
+    inputRef.current?.blur();
+  };
   return (
     <div className="sales-date-input">
       <input
+        ref={inputRef}
         className="input"
         value={toDmy(value)}
         placeholder="dd-mm-yyyy"
@@ -820,11 +833,42 @@ function DateTextInput({ value, onChange }: { value: string; onChange: (value: s
         ref={pickerRef}
         type="date"
         value={/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          closePicker();
+        }}
         tabIndex={-1}
         aria-hidden="true"
       />
     </div>
+  );
+}
+
+function DateIconButton({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const openPicker = () => {
+    const picker = pickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    if (picker?.showPicker) picker.showPicker();
+    else picker?.click();
+  };
+  return (
+    <button
+      type="button"
+      className={`sales-note-date ${value ? 'has-date' : ''}`}
+      title={value ? `Next action date ${toDmy(value)}` : 'Set next action date'}
+      aria-label={value ? `Next action date ${toDmy(value)}` : 'Set next action date'}
+      onClick={openPicker}
+    >
+      <Icon name="calendar" size={14} />
+      <input
+        ref={pickerRef}
+        type="date"
+        value={/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''}
+        onChange={(e) => onChange(e.target.value)}
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </button>
   );
 }
 

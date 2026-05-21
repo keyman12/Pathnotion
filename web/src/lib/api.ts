@@ -88,7 +88,7 @@ export const api = {
       valueAmount?: number;
       document?: { linkType: SalesLink['linkType']; linkRef: string; label?: string | null };
     }) => fetchJson<SalesOpportunity>('/sales/opportunities', { method: 'POST', body: JSON.stringify(body) }),
-    patchOpportunity: (id: string, body: Partial<SalesOpportunity> & { note?: string | null }) =>
+    patchOpportunity: (id: string, body: Partial<SalesOpportunity> & { note?: string | null; noteActionDate?: string | null }) =>
       fetchJson<SalesOpportunity>(`/sales/opportunities/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     removeOpportunity: (id: string) => fetchJson<void>(`/sales/opportunities/${id}`, { method: 'DELETE' }),
     reorder: (items: Array<{ id: string; sortOrder: number; stage?: SalesOpportunity['stage'] }>) =>

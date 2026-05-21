@@ -901,6 +901,49 @@
   pointer-events: none;
 }
 
+.sales-note-input {
+  position: relative;
+}
+
+.sales-note-input textarea.input {
+  min-height: 88px;
+  width: 100%;
+  padding-right: 42px;
+  resize: vertical;
+}
+
+.sales-note-date {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.sales-note-date:hover,
+.sales-note-date.has-date {
+  border-color: var(--border-subtle);
+  background: var(--bg-sunken);
+  color: var(--path-primary);
+}
+
+.sales-note-date input[type="date"] {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .sales-field.is-wide,
 .sales-form-actions {
   grid-column: 1 / -1;
@@ -1190,6 +1233,10 @@
   .sales-form,
   .sales-attach {
     grid-template-columns: 1fr;
+  }
+  .sales-note-input textarea.input {
+    padding-right: 42px;
+    padding-top: 10px;
   }
   .sales-create h2 { max-width: none; }
 }

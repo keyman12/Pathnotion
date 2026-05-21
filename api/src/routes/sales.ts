@@ -188,6 +188,7 @@ const patchSchema = z.object({
   nextActionDate: z.string().nullish(),
   notes: z.string().nullish(),
   note: z.string().nullish(),
+  noteActionDate: z.string().nullish(),
 });
 
 salesRouter.patch('/opportunities/:id', (req, res) => {
@@ -230,7 +231,20 @@ salesRouter.patch('/opportunities/:id', (req, res) => {
       sets.push("updated_at = datetime('now')");
       db.prepare(`UPDATE sales_opportunities SET ${sets.join(', ')} WHERE id = @id`).run(params);
     }
-    if (parsed.data.note?.trim()) insertActivity(req.params.id, 'note', parsed.data.note.trim(), parsed.data.ownerKey ?? before.ownerKey);
+    const note = parsed.data.note?.trim();
+    const noteActionDate = parsed.data.noteActionDate?.trim();
+    if (note) {
+      insertActivity(req.params.id, 'note', note, parsed.data.ownerKey ?? before.ownerKey);
+      if (noteActionDate) {
+        db.prepare(`
+          UPDATE sales_opportunities
+          SET next_action = ?,
+              next_action_date = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `).run(note, noteActionDate, req.params.id);
+      }
+    }
     if (parsed.data.stage && parsed.data.stage !== before.stage) {
       insertActivity(req.params.id, 'stage', `Stage moved to ${stageLabel(parsed.data.stage)}`, parsed.data.ownerKey ?? before.ownerKey);
     }

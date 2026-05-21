@@ -167,7 +167,7 @@ export function useCreateSalesOpportunity() {
 export function usePatchSalesOpportunity() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { id: string; patch: Partial<SalesOpportunity> & { note?: string | null } }) =>
+    mutationFn: (args: { id: string; patch: Partial<SalesOpportunity> & { note?: string | null; noteActionDate?: string | null } }) =>
       api.sales.patchOpportunity(args.id, args.patch),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['sales'] });
