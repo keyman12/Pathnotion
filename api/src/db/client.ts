@@ -91,6 +91,7 @@ db.exec(`
 // Jeff's scan cap — how many Drive files the scan job will read per run. Lives on workspace_config
 // so it's a single knob, easy to reason about.
 try { db.exec('ALTER TABLE workspace_config ADD COLUMN jeff_scan_cap INTEGER NOT NULL DEFAULT 40'); } catch { /* already present */ }
+try { db.exec("ALTER TABLE workspace_config ADD COLUMN jeff_meeting_notes_folder_path TEXT NOT NULL DEFAULT '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings'"); } catch { /* already present */ }
 
 // Lightweight Sales CRM. Account and contact fields deliberately live on the opportunity in v1.
 db.exec(`

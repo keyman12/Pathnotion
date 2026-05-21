@@ -600,14 +600,23 @@ function CalendarTab() {
       const { url } = await connect.mutateAsync();
       // Open the Google consent in a popup; callback tab closes itself.
       const popup = window.open(url, 'pn-google-connect', 'width=540,height=720');
-      // Poll for the popup closing. Fires after consent completes (popup self-closes) or after
-      // the user dismisses the popup. Either way we refetch so the main window reflects reality.
+      if (!popup) {
+        window.location.href = url;
+        return;
+      }
+      // Poll while the popup is open as well as when it closes. Some browsers keep the callback
+      // page alive instead of allowing window.close(), so waiting only for popup.closed can leave
+      // the main Settings page showing stale connection state.
       if (popup) {
+        let ticks = 0;
         const interval = window.setInterval(() => {
+          ticks += 1;
+          if (ticks % 2 === 0) statusQ.refetch();
           if (popup.closed) {
             window.clearInterval(interval);
             statusQ.refetch();
           }
+          if (ticks > 240) window.clearInterval(interval);
         }, 500);
       }
     } catch (err) {
@@ -1116,17 +1125,21 @@ function ScanScopePanel() {
   const save = useSaveJeffSettings();
   const unpin = useUnpinFolder();
   const [cap, setCap] = useState<number | ''>('');
+  const [meetingNotesFolderPath, setMeetingNotesFolderPath] = useState('');
 
   useEffect(() => {
     if (settingsQ.data && cap === '') setCap(settingsQ.data.scanCap);
-  }, [settingsQ.data, cap]);
+    if (settingsQ.data && meetingNotesFolderPath === '') setMeetingNotesFolderPath(settingsQ.data.meetingNotesFolderPath);
+  }, [settingsQ.data, cap, meetingNotesFolderPath]);
 
   const pinned = pinnedQ.data ?? [];
 
   const onSave = async () => {
     const value = Number(cap);
     if (!Number.isFinite(value) || value < 1 || value > 500) return alert('Scan cap must be a number between 1 and 500.');
-    try { await save.mutateAsync({ scanCap: value }); }
+    const folderPath = meetingNotesFolderPath.trim();
+    if (!folderPath) return alert('Meeting notes folder path is required.');
+    try { await save.mutateAsync({ scanCap: value, meetingNotesFolderPath: folderPath }); }
     catch (err) { alert(`Save failed: ${(err as Error).message}`); }
   };
 
@@ -1178,6 +1191,16 @@ function ScanScopePanel() {
             </button>
           </div>
         </div>
+
+        <Labelled label="Meeting notes folder">
+          <input
+            value={meetingNotesFolderPath}
+            onChange={(e) => setMeetingNotesFolderPath(e.target.value)}
+            className="input"
+            placeholder="/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings"
+            style={{ width: '100%', height: 32, marginBottom: 12, fontSize: 12 }}
+          />
+        </Labelled>
 
         {pinned.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--fg-3)', padding: '8px 2px' }}>

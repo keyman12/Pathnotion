@@ -3,7 +3,7 @@ import { Dropdown } from '../components/Dropdown';
 import { Icon } from '../components/Icon';
 import { Badge, Button, Card, MetaLabel } from '../components/primitives';
 import { api } from '../lib/api';
-import { useCreateSalesBrief, useCreateSalesOpportunity, useDeleteSalesOpportunity, useFindSalesLinkedIn, usePatchSalesOpportunity, useReorderSalesOpportunities, useSalesOpportunity, useSalesOpportunities, useSalesSummary } from '../lib/queries';
+import { useCreateSalesBrief, useCreateSalesOpportunity, useDeleteSalesOpportunity, useFindMeetingNotes, useFindSalesLinkedIn, usePatchSalesOpportunity, useReorderSalesOpportunities, useSalesOpportunity, useSalesOpportunities, useSalesSummary } from '../lib/queries';
 import { useUI } from '../lib/store';
 import type { FounderKey, SalesForecastLabel, SalesOpportunity, SalesStage, SalesStatus, SalesSummary } from '../lib/types';
 
@@ -410,6 +410,7 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
   const remove = useDeleteSalesOpportunity();
   const findLinkedIn = useFindSalesLinkedIn();
   const createBrief = useCreateSalesBrief();
+  const findMeetingNotes = useFindMeetingNotes();
   const opportunity = opportunityQ.data;
   const [note, setNote] = useState('');
   const [noteActionDate, setNoteActionDate] = useState('');
@@ -500,6 +501,15 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
       window.alert(err instanceof Error ? err.message : 'Jeff could not create the company brief.');
     }
   };
+  const scanMeetingNotes = async () => {
+    try {
+      const result = await findMeetingNotes.mutateAsync(id);
+      await opportunityQ.refetch();
+      if (!result.linked) window.alert('Jeff did not find any new meeting notes for this opportunity.');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Jeff could not scan meeting notes.');
+    }
+  };
 
   return (
     <div className="screen-enter sales-screen">
@@ -546,13 +556,15 @@ function OpportunityEdit({ id, onBack }: { id: string; onBack: () => void }) {
         <FilesSection
           opportunity={value as SalesOpportunity}
           links={opportunity.links ?? []}
-          busy={filesBusy || findLinkedIn.isPending || createBrief.isPending}
+          busy={filesBusy || findLinkedIn.isPending || createBrief.isPending || findMeetingNotes.isPending}
           onUpload={uploadFile}
           onRemove={removeFile}
           onFindLinkedIn={enrichLinkedIn}
           onCreateBrief={enrichBrief}
+          onFindMeetingNotes={scanMeetingNotes}
           findingLinkedIn={findLinkedIn.isPending}
           creatingBrief={createBrief.isPending}
+          findingMeetingNotes={findMeetingNotes.isPending}
         />
         <div className="section-h" style={{ marginTop: 16 }}><h2>Timeline</h2><span className="fg-3">Newest first</span></div>
         <div className="sales-timeline">
@@ -622,8 +634,10 @@ function FilesSection({
   onRemove,
   onFindLinkedIn,
   onCreateBrief,
+  onFindMeetingNotes,
   findingLinkedIn,
   creatingBrief,
+  findingMeetingNotes,
 }: {
   opportunity: SalesOpportunity;
   links: NonNullable<SalesOpportunity['links']>;
@@ -632,8 +646,10 @@ function FilesSection({
   onRemove: (id: string) => void;
   onFindLinkedIn: () => void;
   onCreateBrief: () => void;
+  onFindMeetingNotes: () => void;
   findingLinkedIn: boolean;
   creatingBrief: boolean;
+  findingMeetingNotes: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useUI((s) => s.navigate);
@@ -644,6 +660,7 @@ function FilesSection({
   const hasBrief = files.some((link) => link.linkType === 'doc' && /^Jeff brief ·/i.test(link.label ?? ''));
   const browserHref = (link: NonNullable<SalesOpportunity['links']>[number]) => {
     if (link.linkType === 'url') return normalizeUrl(link.linkRef);
+    if (link.linkType === 'drive') return googleDriveOpenUrl(link.linkRef);
     return null;
   };
   const openLink = async (link: NonNullable<SalesOpportunity['links']>[number]) => {
@@ -651,7 +668,11 @@ function FilesSection({
       openExternalUrl(normalizeUrl(link.linkRef));
       return;
     }
-    if (link.linkType === 'upload' || link.linkType === 'drive') {
+    if (link.linkType === 'drive') {
+      openExternalUrl(googleDriveOpenUrl(link.linkRef));
+      return;
+    }
+    if (link.linkType === 'upload') {
       const opened = window.open('', '_blank');
       try {
         if (opened) {
@@ -685,6 +706,9 @@ function FilesSection({
           </button>
           <button type="button" onClick={onCreateBrief} disabled={busy}>
             {creatingBrief ? 'Briefing…' : hasBrief ? 'Refresh brief' : 'Create brief'}
+          </button>
+          <button type="button" onClick={onFindMeetingNotes} disabled={busy}>
+            {findingMeetingNotes ? 'Scanning…' : 'Find meeting notes'}
           </button>
           <button type="button" className="fg-brand" onClick={() => inputRef.current?.click()} disabled={busy}>
             {busy ? 'Working…' : 'Upload file'}
@@ -806,17 +830,10 @@ function MoneyInput({ value, onChange }: { value: number; onChange: (value: numb
 function DateTextInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
-  const suppressOpenUntil = useRef(0);
   const openPicker = () => {
-    if (Date.now() < suppressOpenUntil.current) return;
     const picker = pickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
     if (picker?.showPicker) picker.showPicker();
     else picker?.click();
-  };
-  const closePicker = () => {
-    suppressOpenUntil.current = Date.now() + 450;
-    pickerRef.current?.blur();
-    inputRef.current?.blur();
   };
   return (
     <div className="sales-date-input">
@@ -833,10 +850,7 @@ function DateTextInput({ value, onChange }: { value: string; onChange: (value: s
         ref={pickerRef}
         type="date"
         value={/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''}
-        onChange={(e) => {
-          onChange(e.target.value);
-          closePicker();
-        }}
+        onChange={(e) => onChange(e.target.value)}
         tabIndex={-1}
         aria-hidden="true"
       />
@@ -898,9 +912,10 @@ function isValidEmail(value: string): boolean {
 function isValidWebsite(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed || /\s/.test(trimmed)) return false;
+  if (/^[\w.-]+$/i.test(trimmed) && /[a-z0-9]/i.test(trimmed)) return true;
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
-    return !!url.hostname && url.hostname.includes('.');
+    return /^[a-z0-9.-]+$/i.test(url.hostname) && /[a-z0-9]/i.test(url.hostname);
   } catch {
     return false;
   }
@@ -908,6 +923,11 @@ function isValidWebsite(value: string): boolean {
 
 function normalizeUrl(value: string): string {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function googleDriveOpenUrl(fileIdOrUrl: string): string {
+  if (/^https?:\/\//i.test(fileIdOrUrl)) return fileIdOrUrl;
+  return `https://drive.google.com/open?id=${encodeURIComponent(fileIdOrUrl)}`;
 }
 
 function openExternalUrl(url: string) {

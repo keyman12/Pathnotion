@@ -501,18 +501,39 @@ agentRouter.delete('/pinned-folders/:id', (req, res) => {
 
 // ─── Jeff operational settings (scan cap lives here) ──────────────────────
 
+const DEFAULT_MEETING_NOTES_FOLDER_PATH = '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings';
+
 agentRouter.get('/settings', (_req, res) => {
-  const row = db.prepare('SELECT jeff_scan_cap AS scanCap FROM workspace_config WHERE id = 1').get() as { scanCap: number | null } | undefined;
+  const row = db.prepare(`
+    SELECT
+      jeff_scan_cap AS scanCap,
+      jeff_meeting_notes_folder_path AS meetingNotesFolderPath
+    FROM workspace_config
+    WHERE id = 1
+  `).get() as { scanCap: number | null; meetingNotesFolderPath: string | null } | undefined;
   const pinnedCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_pinned_folders').get() as { n: number }).n;
-  res.json({ scanCap: row?.scanCap ?? 40, pinnedCount });
+  res.json({
+    scanCap: row?.scanCap ?? 40,
+    pinnedCount,
+    meetingNotesFolderPath: row?.meetingNotesFolderPath || DEFAULT_MEETING_NOTES_FOLDER_PATH,
+  });
 });
 
 agentRouter.put('/settings', (req, res) => {
-  const parsed = z.object({ scanCap: z.number().int().min(1).max(500) }).safeParse(req.body);
+  const parsed = z.object({
+    scanCap: z.number().int().min(1).max(500),
+    meetingNotesFolderPath: z.string().trim().min(1).max(1000),
+  }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   // Make sure the singleton workspace_config row exists first.
   db.prepare("INSERT OR IGNORE INTO workspace_config (id) VALUES (1)").run();
-  db.prepare("UPDATE workspace_config SET jeff_scan_cap = ?, updated_at = datetime('now') WHERE id = 1").run(parsed.data.scanCap);
+  db.prepare(`
+    UPDATE workspace_config
+    SET jeff_scan_cap = ?,
+        jeff_meeting_notes_folder_path = ?,
+        updated_at = datetime('now')
+    WHERE id = 1
+  `).run(parsed.data.scanCap, parsed.data.meetingNotesFolderPath);
   res.json({ ok: true });
 });
 

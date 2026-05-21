@@ -9,7 +9,7 @@ import { db } from '../db/client.js';
 import { type GoogleTokens } from '../services/google-calendar.js';
 import { decryptToken } from '../services/token-vault.js';
 import { ensureFolder, getEntry, uploadFile } from '../services/google-drive.js';
-import { createOrRefreshCompanyBrief, findSalesLinkedIn, runInitialSalesEnrichment } from '../services/sales-enrichment.js';
+import { createOrRefreshCompanyBrief, findMeetingNotesForOpportunity, findSalesLinkedIn, runInitialSalesEnrichment } from '../services/sales-enrichment.js';
 import {
   defaultForecastProbability,
   getSalesOpportunity,
@@ -83,6 +83,16 @@ salesRouter.post('/opportunities/:id/enrich/brief', async (req, res) => {
   }
 });
 
+salesRouter.post('/opportunities/:id/enrich/meeting-notes', async (req, res) => {
+  try {
+    const userKey = req.session?.userKey;
+    if (!userKey) return res.status(401).json({ error: 'Not authenticated' });
+    res.json(await findMeetingNotesForOpportunity(String(req.params.id), requireGoogleTokens(userKey)));
+  } catch (err: any) {
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Meeting notes scan failed' });
+  }
+});
+
 salesRouter.post('/opportunities', (req, res) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
@@ -136,7 +146,8 @@ salesRouter.post('/opportunities', (req, res) => {
 
   const row = db.prepare(`${SELECT_SALES_OPPORTUNITY} WHERE id = ?`).get(id) as any;
   res.status(201).json(mapSalesOpportunity(row));
-  void runInitialSalesEnrichment(id);
+  const userKey = req.session?.userKey;
+  void runInitialSalesEnrichment(id, userKey ? requireGoogleTokens(userKey) : undefined);
 });
 
 salesRouter.post('/opportunities/:id/attachments', upload.single('file'), (req, res) => {

@@ -97,6 +97,8 @@ export const api = {
       fetchJson<{ opportunity: SalesOpportunity; link?: SalesLink }>(`/sales/opportunities/${id}/enrich/linkedin`, { method: 'POST' }),
     createBrief: (id: string) =>
       fetchJson<{ opportunity: SalesOpportunity; link?: SalesLink; docId?: string; summary?: string }>(`/sales/opportunities/${id}/enrich/brief`, { method: 'POST' }),
+    findMeetingNotes: (id: string) =>
+      fetchJson<{ opportunity: SalesOpportunity; link?: SalesLink; linked: number; skipped: number; scanned: number }>(`/sales/opportunities/${id}/enrich/meeting-notes`, { method: 'POST' }),
     summary: () => fetchJson<SalesSummary>('/sales/summary'),
     activities: (opportunityId: string) => fetchJson<SalesActivity[]>(`/sales/activities?opportunity=${encodeURIComponent(opportunityId)}`),
     createActivity: (body: { opportunityId: string; type?: SalesActivity['type']; body: string; authorKey?: string | null }) =>
@@ -275,8 +277,8 @@ export const api = {
         fetchJson<void>(`/agent/pinned-folders/${driveFolderId}`, { method: 'DELETE' }),
     },
     settings: {
-      get: () => fetchJson<{ scanCap: number; pinnedCount: number }>('/agent/settings'),
-      put: (body: { scanCap: number }) =>
+      get: () => fetchJson<{ scanCap: number; pinnedCount: number; meetingNotesFolderPath: string }>('/agent/settings'),
+      put: (body: { scanCap: number; meetingNotesFolderPath: string }) =>
         fetchJson<{ ok: true }>('/agent/settings', { method: 'PUT', body: JSON.stringify(body) }),
     },
     access: () => fetchJson<AccessGrant[]>('/agent/access'),

@@ -222,6 +222,18 @@ export function useCreateSalesBrief() {
   });
 }
 
+export function useFindMeetingNotes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.sales.findMeetingNotes(id),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales', 'opportunity', id] });
+    },
+    onError: (err) => handle401(err, qc),
+  });
+}
+
 // Calendar
 export function useCalendar() {
   return useQuery({

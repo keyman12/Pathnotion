@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { db } from '../db/client.js';
 import { askJeff, JEFF_MODEL_REPORT } from './jeff.js';
+import { fetchFileContent, getEntry } from './google-drive.js';
+import { type GoogleTokens } from './google-calendar.js';
 import { getSalesOpportunity, type SalesOpportunity } from './sales-summary.js';
 
 type SalesLinkRow = {
@@ -138,7 +142,72 @@ Return markdown only. No preamble.`;
   };
 }
 
-export async function runInitialSalesEnrichment(opportunityId: string): Promise<void> {
+export async function findMeetingNotesForOpportunity(opportunityId: string, tokens: GoogleTokens): Promise<SalesEnrichmentResult & { linked: number; skipped: number; scanned: number }> {
+  const opportunity = requireOpportunity(opportunityId);
+  const folderPath = getMeetingNotesFolderPath();
+  if (!fs.existsSync(folderPath)) {
+    throw Object.assign(new Error(`Meeting notes folder not found: ${folderPath}`), { status: 404 });
+  }
+
+  const entries = fs.readdirSync(folderPath, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.gdoc'))
+    .map((entry) => path.join(folderPath, entry.name))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+    .slice(0, 50);
+
+  let linked = 0;
+  let skipped = 0;
+  let scanned = 0;
+  let latestLink: SalesLinkRow | undefined;
+
+  for (const filePath of entries) {
+    const pointer = readGoogleDocPointer(filePath);
+    if (!pointer?.docId) {
+      skipped += 1;
+      continue;
+    }
+    if (findExistingDriveLink(pointer.docId)) {
+      skipped += 1;
+      continue;
+    }
+    scanned += 1;
+
+    const entry = await getEntry(tokens, pointer.docId);
+    const title = entry?.name || cleanMeetingNoteLabel(path.basename(filePath, '.gdoc'));
+    let text = '';
+    if (entry) {
+      try {
+        const content = await fetchFileContent(tokens, entry, { maxTextChars: 20_000 });
+        if (content?.kind === 'text') text = content.text;
+      } catch {
+        text = '';
+      }
+    }
+
+    const match = scoreMeetingNoteMatch(opportunity, `${title}\n${text}`);
+    if (match.score < 4) {
+      skipped += 1;
+      continue;
+    }
+
+    latestLink = insertSalesLink({
+      opportunityId,
+      linkType: 'drive',
+      linkRef: pointer.docId,
+      label: title,
+    });
+    addSalesActivity(opportunityId, `Meeting notes linked: ${title}`, 'link');
+    linked += 1;
+  }
+
+  if (!linked) {
+    addSalesActivity(opportunityId, `Jeff scanned meeting notes and found no new confident match.`, 'jeff');
+  }
+
+  return { opportunity: requireOpportunity(opportunityId), link: latestLink, linked, skipped, scanned };
+}
+
+export async function runInitialSalesEnrichment(opportunityId: string, tokens?: GoogleTokens): Promise<void> {
   try {
     await findSalesLinkedIn(opportunityId);
   } catch (err) {
@@ -149,6 +218,114 @@ export async function runInitialSalesEnrichment(opportunityId: string): Promise<
     await createOrRefreshCompanyBrief(opportunityId);
   } catch (err) {
     console.warn(`[sales-enrichment] initial brief failed for ${opportunityId}:`, (err as Error).message);
+  }
+
+  if (tokens) {
+    try {
+      await findMeetingNotesForOpportunity(opportunityId, tokens);
+    } catch (err) {
+      console.warn(`[sales-enrichment] initial meeting notes scan failed for ${opportunityId}:`, (err as Error).message);
+    }
+  }
+}
+
+function getMeetingNotesFolderPath(): string {
+  const row = db.prepare(`
+    SELECT jeff_meeting_notes_folder_path AS meetingNotesFolderPath
+    FROM workspace_config
+    WHERE id = 1
+  `).get() as { meetingNotesFolderPath: string | null } | undefined;
+  return row?.meetingNotesFolderPath || '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings';
+}
+
+function readGoogleDocPointer(filePath: string): { docId: string; email?: string } | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { doc_id?: string; email?: string };
+    if (!parsed.doc_id) return null;
+    return { docId: parsed.doc_id, email: parsed.email };
+  } catch {
+    return null;
+  }
+}
+
+function findExistingDriveLink(docId: string): SalesLinkRow | undefined {
+  return db.prepare(`
+    SELECT id,
+           opportunity_id AS opportunityId,
+           link_type AS linkType,
+           link_ref AS linkRef,
+           label,
+           created_at AS createdAt
+    FROM sales_links
+    WHERE link_ref = ?
+       OR link_ref LIKE ?
+    LIMIT 1
+  `).get(docId, `%${docId}%`) as SalesLinkRow | undefined;
+}
+
+function scoreMeetingNoteMatch(opportunity: SalesOpportunity, rawText: string): { score: number; reasons: string[] } {
+  const text = normalizeMatchText(rawText);
+  const reasons: string[] = [];
+  let score = 0;
+  const add = (points: number, reason: string) => {
+    score += points;
+    reasons.push(reason);
+  };
+
+  const account = normalizeMatchText(opportunity.accountName);
+  const contact = normalizeMatchText(opportunity.contactName);
+  const websiteDomain = domainFromValue(opportunity.website);
+  const emailDomain = domainFromValue(opportunity.contactEmail);
+  const opportunityWords = meaningfulWords(opportunity.name);
+
+  if (account && text.includes(account)) add(4, 'account');
+  if (contact && text.includes(contact)) add(4, 'contact');
+  if (websiteDomain && text.includes(websiteDomain)) add(3, 'website domain');
+  if (emailDomain && text.includes(emailDomain)) add(3, 'email domain');
+  for (const word of opportunityWords) {
+    if (text.includes(word)) add(1, `opportunity:${word}`);
+  }
+  for (const part of meaningfulWords(opportunity.contactName)) {
+    if (text.includes(part)) add(1, `contact:${part}`);
+  }
+
+  return { score, reasons };
+}
+
+function cleanMeetingNoteLabel(name: string): string {
+  return name
+    .replace(/\s+-\s+Notes by Gemini$/i, '')
+    .replace(/\s+-\s+\d{4}\s+\d{2}\s+\d{2}.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim() || name;
+}
+
+function normalizeMatchText(value: string | null | undefined): string {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/https?:\/\//g, '')
+    .replace(/www\./g, '')
+    .replace(/[^a-z0-9.@-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function meaningfulWords(value: string | null | undefined): string[] {
+  const stop = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'via', 'sales', 'meeting', 'intro', 'call']);
+  return normalizeMatchText(value)
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && !stop.has(word))
+    .slice(0, 8);
+}
+
+function domainFromValue(value: string | null | undefined): string | null {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return null;
+  const source = raw.includes('@') ? raw.split('@').pop()! : raw;
+  try {
+    return new URL(/^https?:\/\//i.test(source) ? source : `https://${source}`).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
   }
 }
 
