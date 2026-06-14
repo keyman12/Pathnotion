@@ -277,8 +277,8 @@ export const api = {
         fetchJson<void>(`/agent/pinned-folders/${driveFolderId}`, { method: 'DELETE' }),
     },
     settings: {
-      get: () => fetchJson<{ scanCap: number; pinnedCount: number; meetingNotesFolderPath: string }>('/agent/settings'),
-      put: (body: { scanCap: number; meetingNotesFolderPath: string }) =>
+      get: () => fetchJson<{ scanCap: number; pinnedCount: number; meetingNotesFolderPath: string; salesMeetingNotesDestinationFolderId: string }>('/agent/settings'),
+      put: (body: { scanCap: number; meetingNotesFolderPath: string; salesMeetingNotesDestinationFolderId: string }) =>
         fetchJson<{ ok: true }>('/agent/settings', { method: 'PUT', body: JSON.stringify(body) }),
     },
     access: () => fetchJson<AccessGrant[]>('/agent/access'),

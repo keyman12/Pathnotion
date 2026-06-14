@@ -1126,11 +1126,13 @@ function ScanScopePanel() {
   const unpin = useUnpinFolder();
   const [cap, setCap] = useState<number | ''>('');
   const [meetingNotesFolderPath, setMeetingNotesFolderPath] = useState('');
+  const [salesMeetingNotesDestinationFolderId, setSalesMeetingNotesDestinationFolderId] = useState('');
 
   useEffect(() => {
     if (settingsQ.data && cap === '') setCap(settingsQ.data.scanCap);
     if (settingsQ.data && meetingNotesFolderPath === '') setMeetingNotesFolderPath(settingsQ.data.meetingNotesFolderPath);
-  }, [settingsQ.data, cap, meetingNotesFolderPath]);
+    if (settingsQ.data && salesMeetingNotesDestinationFolderId === '') setSalesMeetingNotesDestinationFolderId(settingsQ.data.salesMeetingNotesDestinationFolderId);
+  }, [settingsQ.data, cap, meetingNotesFolderPath, salesMeetingNotesDestinationFolderId]);
 
   const pinned = pinnedQ.data ?? [];
 
@@ -1139,7 +1141,9 @@ function ScanScopePanel() {
     if (!Number.isFinite(value) || value < 1 || value > 500) return alert('Scan cap must be a number between 1 and 500.');
     const folderPath = meetingNotesFolderPath.trim();
     if (!folderPath) return alert('Meeting notes folder path is required.');
-    try { await save.mutateAsync({ scanCap: value, meetingNotesFolderPath: folderPath }); }
+    const destinationFolderId = salesMeetingNotesDestinationFolderId.trim();
+    if (!destinationFolderId) return alert('Sales meeting notes destination folder id is required.');
+    try { await save.mutateAsync({ scanCap: value, meetingNotesFolderPath: folderPath, salesMeetingNotesDestinationFolderId: destinationFolderId }); }
     catch (err) { alert(`Save failed: ${(err as Error).message}`); }
   };
 
@@ -1198,6 +1202,15 @@ function ScanScopePanel() {
             onChange={(e) => setMeetingNotesFolderPath(e.target.value)}
             className="input"
             placeholder="/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings"
+            style={{ width: '100%', height: 32, marginBottom: 12, fontSize: 12 }}
+          />
+        </Labelled>
+        <Labelled label="Sales meeting notes destination folder id or URL">
+          <input
+            value={salesMeetingNotesDestinationFolderId}
+            onChange={(e) => setSalesMeetingNotesDestinationFolderId(e.target.value)}
+            className="input"
+            placeholder="1-kfQWaPFLjH2l2-QeuQMUJ71WUiPufBf"
             style={{ width: '100%', height: 32, marginBottom: 12, fontSize: 12 }}
           />
         </Labelled>

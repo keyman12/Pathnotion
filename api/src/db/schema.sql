@@ -250,7 +250,9 @@ CREATE TABLE IF NOT EXISTS sales_links (
   opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
   link_type       TEXT NOT NULL,
   link_ref        TEXT NOT NULL,
+  source_ref      TEXT,
   label           TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_sales_links_opportunity ON sales_links(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_sales_links_source_ref ON sales_links(source_ref);

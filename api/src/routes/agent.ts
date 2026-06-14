@@ -502,20 +502,23 @@ agentRouter.delete('/pinned-folders/:id', (req, res) => {
 // ─── Jeff operational settings (scan cap lives here) ──────────────────────
 
 const DEFAULT_MEETING_NOTES_FOLDER_PATH = '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings';
+const DEFAULT_SALES_MEETING_NOTES_DESTINATION_FOLDER_ID = '1-kfQWaPFLjH2l2-QeuQMUJ71WUiPufBf';
 
 agentRouter.get('/settings', (_req, res) => {
   const row = db.prepare(`
     SELECT
       jeff_scan_cap AS scanCap,
-      jeff_meeting_notes_folder_path AS meetingNotesFolderPath
+      jeff_meeting_notes_folder_path AS meetingNotesFolderPath,
+      sales_meeting_notes_destination_folder_id AS salesMeetingNotesDestinationFolderId
     FROM workspace_config
     WHERE id = 1
-  `).get() as { scanCap: number | null; meetingNotesFolderPath: string | null } | undefined;
+  `).get() as { scanCap: number | null; meetingNotesFolderPath: string | null; salesMeetingNotesDestinationFolderId: string | null } | undefined;
   const pinnedCount = (db.prepare('SELECT COUNT(*) AS n FROM jeff_pinned_folders').get() as { n: number }).n;
   res.json({
     scanCap: row?.scanCap ?? 40,
     pinnedCount,
     meetingNotesFolderPath: row?.meetingNotesFolderPath || DEFAULT_MEETING_NOTES_FOLDER_PATH,
+    salesMeetingNotesDestinationFolderId: row?.salesMeetingNotesDestinationFolderId || DEFAULT_SALES_MEETING_NOTES_DESTINATION_FOLDER_ID,
   });
 });
 
@@ -523,19 +526,33 @@ agentRouter.put('/settings', (req, res) => {
   const parsed = z.object({
     scanCap: z.number().int().min(1).max(500),
     meetingNotesFolderPath: z.string().trim().min(1).max(1000),
+    salesMeetingNotesDestinationFolderId: z.string().trim().min(1).max(300).optional(),
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+  const destinationFolderId = driveFolderIdFromInput(
+    parsed.data.salesMeetingNotesDestinationFolderId || DEFAULT_SALES_MEETING_NOTES_DESTINATION_FOLDER_ID,
+  );
+  if (!destinationFolderId) return res.status(400).json({ error: 'Sales meeting notes destination folder id is invalid.' });
   // Make sure the singleton workspace_config row exists first.
   db.prepare("INSERT OR IGNORE INTO workspace_config (id) VALUES (1)").run();
   db.prepare(`
     UPDATE workspace_config
     SET jeff_scan_cap = ?,
         jeff_meeting_notes_folder_path = ?,
+        sales_meeting_notes_destination_folder_id = ?,
         updated_at = datetime('now')
     WHERE id = 1
-  `).run(parsed.data.scanCap, parsed.data.meetingNotesFolderPath);
+  `).run(parsed.data.scanCap, parsed.data.meetingNotesFolderPath, destinationFolderId);
   res.json({ ok: true });
 });
+
+function driveFolderIdFromInput(value: string): string | null {
+  const trimmed = value.trim();
+  const match = /\/folders\/([^/?#]+)/.exec(trimmed);
+  if (match?.[1]) return match[1];
+  if (/^[A-Za-z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
 
 // ─── Access grants (unchanged) ──────────────────────────────────────────────
 

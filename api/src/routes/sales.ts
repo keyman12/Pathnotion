@@ -172,6 +172,7 @@ salesRouter.post('/opportunities/:id/attachments', upload.single('file'), (req, 
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -364,6 +365,7 @@ salesRouter.post('/links', (req, res) => {
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -409,6 +411,7 @@ salesRouter.delete('/links/:id', (req, res) => {
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label
     FROM sales_links
     WHERE id = ?
@@ -437,6 +440,7 @@ function readSalesLink(id: string) {
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -446,6 +450,7 @@ function readSalesLink(id: string) {
     opportunityId: string;
     linkType: string;
     linkRef: string;
+    sourceRef: string | null;
     label: string | null;
     createdAt: string;
   } | undefined;

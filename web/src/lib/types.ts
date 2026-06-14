@@ -235,6 +235,7 @@ export interface SalesLink {
   opportunityId: string;
   linkType: 'doc' | 'drive' | 'url' | 'upload' | 'backlog' | 'task' | 'calendar';
   linkRef: string;
+  sourceRef: string | null;
   label: string | null;
   createdAt: string;
 }

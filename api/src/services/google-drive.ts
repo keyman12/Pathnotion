@@ -220,6 +220,48 @@ export async function uploadFile(
   return toEntry(res.data);
 }
 
+/** Copy a Drive file into another folder. Used for Gemini meeting notes so PathNotion links
+ *  the shared copy, not the user's private original. */
+export async function copyFile(
+  tokens: GoogleTokens,
+  opts: { fileId: string; parentId: string; name?: string },
+): Promise<DriveEntry> {
+  const drive = driveApi(tokens);
+  const res = await drive.files.copy({
+    fileId: opts.fileId,
+    supportsAllDrives: true,
+    requestBody: {
+      name: opts.name,
+      parents: [opts.parentId],
+    },
+    fields: BASE_FIELDS,
+  });
+  return toEntry(res.data);
+}
+
+/** Create a Google Doc in Drive from plain text. This is the fallback for cases where
+ *  Google refuses an exact files.copy because the app only has read access to the source. */
+export async function createGoogleDocFromText(
+  tokens: GoogleTokens,
+  opts: { parentId: string; name: string; text: string },
+): Promise<DriveEntry> {
+  const drive = driveApi(tokens);
+  const res = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: opts.name,
+      mimeType: 'application/vnd.google-apps.document',
+      parents: [opts.parentId],
+    },
+    media: {
+      mimeType: 'text/plain; charset=utf-8',
+      body: Readable.from(Buffer.from(opts.text || opts.name, 'utf8')),
+    },
+    fields: BASE_FIELDS,
+  });
+  return toEntry(res.data);
+}
+
 /** Rename a file. Drive keeps the same id, so the row position won't jump. */
 export async function renameFile(tokens: GoogleTokens, id: string, name: string): Promise<DriveEntry> {
   const drive = driveApi(tokens);

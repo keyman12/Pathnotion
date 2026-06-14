@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../db/client.js';
 import { askJeff, JEFF_MODEL_REPORT } from './jeff.js';
-import { fetchFileContent, getEntry } from './google-drive.js';
+import { copyFile, createGoogleDocFromText, fetchFileContent, getEntry } from './google-drive.js';
 import { type GoogleTokens } from './google-calendar.js';
 import { getSalesOpportunity, type SalesOpportunity } from './sales-summary.js';
 
@@ -12,6 +12,7 @@ type SalesLinkRow = {
   opportunityId: string;
   linkType: 'doc' | 'drive' | 'url' | 'upload' | 'backlog' | 'task' | 'calendar';
   linkRef: string;
+  sourceRef: string | null;
   label: string | null;
   createdAt: string;
 };
@@ -166,7 +167,7 @@ export async function findMeetingNotesForOpportunity(opportunityId: string, toke
       skipped += 1;
       continue;
     }
-    if (findExistingDriveLink(pointer.docId)) {
+    if (findExistingDriveLink(opportunityId, pointer.docId)) {
       skipped += 1;
       continue;
     }
@@ -190,13 +191,31 @@ export async function findMeetingNotesForOpportunity(opportunityId: string, toke
       continue;
     }
 
+    const destinationFolderId = getSalesMeetingNotesDestinationFolderId();
+    const sharedName = sharedMeetingNoteName(opportunity, title);
+    let copied;
+    try {
+      copied = await copyFile(tokens, {
+        fileId: pointer.docId,
+        parentId: destinationFolderId,
+        name: sharedName,
+      });
+    } catch {
+      copied = await createGoogleDocFromText(tokens, {
+        parentId: destinationFolderId,
+        name: sharedName,
+        text: text || `${title}\n\nImported from Gemini meeting notes. No readable text was returned by Google Drive.`,
+      });
+    }
+
     latestLink = insertSalesLink({
       opportunityId,
       linkType: 'drive',
-      linkRef: pointer.docId,
-      label: title,
+      linkRef: copied.id,
+      sourceRef: pointer.docId,
+      label: copied.name || title,
     });
-    addSalesActivity(opportunityId, `Meeting notes linked: ${title}`, 'link');
+    addSalesActivity(opportunityId, `Meeting notes copied to shared drive and linked: ${copied.name || title}`, 'link');
     linked += 1;
   }
 
@@ -238,6 +257,15 @@ function getMeetingNotesFolderPath(): string {
   return row?.meetingNotesFolderPath || '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings';
 }
 
+function getSalesMeetingNotesDestinationFolderId(): string {
+  const row = db.prepare(`
+    SELECT sales_meeting_notes_destination_folder_id AS folderId
+    FROM workspace_config
+    WHERE id = 1
+  `).get() as { folderId: string | null } | undefined;
+  return row?.folderId || '1-kfQWaPFLjH2l2-QeuQMUJ71WUiPufBf';
+}
+
 function readGoogleDocPointer(filePath: string): { docId: string; email?: string } | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { doc_id?: string; email?: string };
@@ -248,19 +276,27 @@ function readGoogleDocPointer(filePath: string): { docId: string; email?: string
   }
 }
 
-function findExistingDriveLink(docId: string): SalesLinkRow | undefined {
+function findExistingDriveLink(opportunityId: string, docId: string): SalesLinkRow | undefined {
   return db.prepare(`
     SELECT id,
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
-    WHERE link_ref = ?
-       OR link_ref LIKE ?
+    WHERE opportunity_id = ?
+      AND (source_ref = ?
+        OR link_ref = ?
+        OR link_ref LIKE ?)
     LIMIT 1
-  `).get(docId, `%${docId}%`) as SalesLinkRow | undefined;
+  `).get(opportunityId, docId, docId, `%${docId}%`) as SalesLinkRow | undefined;
+}
+
+function sharedMeetingNoteName(opportunity: SalesOpportunity, title: string): string {
+  const prefix = `${opportunity.accountName} - `;
+  return title.startsWith(prefix) ? title : `${prefix}${title}`;
 }
 
 function scoreMeetingNoteMatch(opportunity: SalesOpportunity, rawText: string): { score: number; reasons: string[] } {
@@ -341,6 +377,7 @@ function findExistingLink(opportunityId: string, needle: string): SalesLinkRow |
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -357,6 +394,7 @@ function findDocLink(opportunityId: string, docId: string): SalesLinkRow | undef
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -367,17 +405,18 @@ function findDocLink(opportunityId: string, docId: string): SalesLinkRow | undef
   `).get(opportunityId, docId) as SalesLinkRow | undefined;
 }
 
-function insertSalesLink(input: { opportunityId: string; linkType: SalesLinkRow['linkType']; linkRef: string; label: string }) {
+function insertSalesLink(input: { opportunityId: string; linkType: SalesLinkRow['linkType']; linkRef: string; label: string; sourceRef?: string | null }) {
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO sales_links (id, opportunity_id, link_type, link_ref, label)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, input.opportunityId, input.linkType, input.linkRef, input.label);
+    INSERT INTO sales_links (id, opportunity_id, link_type, link_ref, source_ref, label)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, input.opportunityId, input.linkType, input.linkRef, input.sourceRef ?? null, input.label);
   return db.prepare(`
     SELECT id,
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links
@@ -397,6 +436,7 @@ function updateSalesLink(id: string, linkRef: string, label: string) {
            opportunity_id AS opportunityId,
            link_type AS linkType,
            link_ref AS linkRef,
+           source_ref AS sourceRef,
            label,
            created_at AS createdAt
     FROM sales_links

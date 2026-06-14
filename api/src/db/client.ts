@@ -92,6 +92,7 @@ db.exec(`
 // so it's a single knob, easy to reason about.
 try { db.exec('ALTER TABLE workspace_config ADD COLUMN jeff_scan_cap INTEGER NOT NULL DEFAULT 40'); } catch { /* already present */ }
 try { db.exec("ALTER TABLE workspace_config ADD COLUMN jeff_meeting_notes_folder_path TEXT NOT NULL DEFAULT '/Users/davidkey/My Drive (dave@path2ai.tech)/Meet Recordings'"); } catch { /* already present */ }
+try { db.exec("ALTER TABLE workspace_config ADD COLUMN sales_meeting_notes_destination_folder_id TEXT NOT NULL DEFAULT '1-kfQWaPFLjH2l2-QeuQMUJ71WUiPufBf'"); } catch { /* already present */ }
 
 // Lightweight Sales CRM. Account and contact fields deliberately live on the opportunity in v1.
 db.exec(`
@@ -149,11 +150,14 @@ db.exec(`
     opportunity_id  TEXT NOT NULL REFERENCES sales_opportunities(id) ON DELETE CASCADE,
     link_type       TEXT NOT NULL,
     link_ref        TEXT NOT NULL,
+    source_ref      TEXT,
     label           TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_links_opportunity ON sales_links(opportunity_id)'); } catch { /* already present */ }
+try { db.exec('ALTER TABLE sales_links ADD COLUMN source_ref TEXT'); } catch { /* already present */ }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_sales_links_source_ref ON sales_links(source_ref)'); } catch { /* already present */ }
 
 try {
   db.prepare(`
