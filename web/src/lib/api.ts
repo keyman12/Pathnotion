@@ -312,7 +312,24 @@ export const api = {
       fetchJson<NotificationPrefs>('/notifications/prefs', { method: 'PATCH', body: JSON.stringify(body) }),
     sendTest: () => fetchJson<{ ok: true }>('/notifications/send-test', { method: 'POST' }),
   },
+  reports: {
+    list: () => fetchJson<ReportSummary[]>('/reports'),
+    latest: () => fetchJson<ReportSummary>('/reports/latest'),
+    /** Browser-addressable URL for the stored report HTML (rendered in a sandboxed iframe).
+     *  Pass the app theme so the report matches the shell — the report reads ?theme= on load. */
+    htmlUrl: (date: string, theme?: 'light' | 'dark') =>
+      `${BASE}/reports/${date}/html${theme ? `?theme=${theme}` : ''}`,
+  },
 };
+
+export interface ReportSummary {
+  date: string;
+  title: string;
+  summary: string | null;
+  counts: { ok: number; lowConfidence: number; failed: number } | null;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface BusinessCategory {
   id: string;

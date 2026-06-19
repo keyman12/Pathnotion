@@ -22,6 +22,7 @@ import { businessCategoriesRouter } from './routes/business-categories.js';
 import { driveRouter } from './routes/drive.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { salesRouter } from './routes/sales.js';
+import { reportsRouter } from './routes/reports.js';
 import { startDigestScheduler } from './services/daily-digest.js';
 import { startCalendarSyncScheduler } from './services/calendar-sync.js';
 import { startGoogleTasksSyncScheduler } from './services/google-tasks-sync.js';
@@ -76,6 +77,10 @@ app.use('/api/business-categories', requireAuth, businessCategoriesRouter);
 app.use('/api/drive', requireAuth, driveRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 app.use('/api/sales', requireAuth, salesRouter);
+
+// Daily Reports. NOT behind global requireAuth: POST /api/reports uses a bearer ingest token
+// (the external daily Mac job), while the GET endpoints apply requireAuth inside the router.
+app.use('/api/reports', reportsRouter);
 
 // In prod, serve the built web bundle from this same server. Nginx proxies everything to us
 // on one upstream, which keeps the deploy story simple (one process, one nginx location).

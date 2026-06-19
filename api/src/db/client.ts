@@ -493,4 +493,20 @@ try {
   `);
 } catch { /* link columns may not exist on a brand-new DB */ }
 
+// Daily Reports — externally-ingested HTML reports (e.g. the UK payment-provider comparison).
+// One row per date; the daily Mac job upserts via POST /api/reports (bearer token). The HTML is
+// self-contained and rendered in a sandboxed iframe by the Daily Reports view.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reports (
+    date        TEXT PRIMARY KEY,        -- 'YYYY-MM-DD'
+    title       TEXT NOT NULL,
+    html        TEXT NOT NULL,           -- self-contained report HTML
+    summary     TEXT,                    -- short plain-text summary
+    counts      TEXT,                    -- JSON { ok, lowConfidence, failed }
+    data_json   TEXT,                    -- the machine-readable dataset (optional)
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 export type DB = typeof db;

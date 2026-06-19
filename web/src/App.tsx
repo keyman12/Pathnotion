@@ -14,6 +14,7 @@ import { CalendarView } from './views/CalendarView';
 import { JeffView } from './views/JeffView';
 import { SettingsView } from './views/SettingsView';
 import { ReportsView } from './views/ReportsView';
+import { DailyReportsView } from './views/DailyReportsView';
 import { SalesView } from './views/SalesView';
 import { LoginScreen } from './views/LoginScreen';
 import { useBusinessCategories } from './lib/queries';
@@ -81,6 +82,7 @@ export function App() {
   else if (route === 'jeff') content = <JeffView />;
   else if (route === 'settings') content = <SettingsView />;
   else if (route === 'reports') content = <ReportsView />;
+  else if (route === 'daily-reports') content = <DailyReportsView />;
   else if (route.startsWith('business:')) content = <BusinessPlaceholder categoryId={route.slice('business:'.length)} />;
   else content = <WeekView now={now} />;
 

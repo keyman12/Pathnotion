@@ -9,6 +9,7 @@ export type Route =
   | 'jeff'
   | 'settings'
   | 'reports'
+  | 'daily-reports'
   | 'sales'
   | 'finance-docs'
   | 'sales-docs'
