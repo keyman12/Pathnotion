@@ -16,6 +16,13 @@ export const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// schema.sql creates an index on sales_links(source_ref), but that column is only guaranteed by a
+// later ALTER migration below. On a database created before the column existed, the schema's index
+// creation would throw and abort boot *before* that migration runs. Add the column up front so the
+// schema always applies cleanly. Idempotent — the table may not exist yet on a brand-new DB (caught),
+// and re-running on a DB that already has the column is a no-op (caught).
+try { db.exec('ALTER TABLE sales_links ADD COLUMN source_ref TEXT'); } catch { /* fresh DB / already present */ }
+
 const schemaSql = fs.readFileSync(path.resolve(__dirname, 'schema.sql'), 'utf8');
 db.exec(schemaSql);
 
